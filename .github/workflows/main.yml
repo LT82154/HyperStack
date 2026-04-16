@@ -1,0 +1,95 @@
+name: HyperStack Workflow Pipeline
+
+on:
+  schedule:
+    # Run every 2 days at 8:00 AM UTC
+    - cron: '0 8 */2 * *'
+  
+  workflow_dispatch:  # Allow manual trigger with category selection
+    inputs:
+      category:
+        description: 'Select category to scrape'
+        required: true
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - flowers_chocolate_by_sogha
+
+jobs:
+  scrape:
+    runs-on: ubuntu-22.04
+    
+    strategy:
+      fail-fast: false  # Continue other jobs even if one fails
+      matrix:
+        category:
+          - name: flowers_chocolate_by_sogha
+            display_name: Flowers & Chocolate by Sogha
+    
+    name: Scrape ${{ matrix.category.display_name }}
+    
+    steps:
+      - name: Check if should run
+        id: should_run
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]] || \
+             [[ "${{ inputs.category }}" == "all" ]] || \
+             [[ "${{ inputs.category }}" == "${{ matrix.category.name }}" ]]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Checkout code
+        if: steps.should_run.outputs.run == 'true'
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        if: steps.should_run.outputs.run == 'true'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        if: steps.should_run.outputs.run == 'true'
+        run: |
+          cd ${{ matrix.category.name }}
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Install Playwright browsers
+        if: steps.should_run.outputs.run == 'true'
+        run: |
+          playwright install chromium
+          playwright install-deps chromium
+      
+      - name: Run scraper
+        if: steps.should_run.outputs.run == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+          MAX_CONCURRENT_SUBCATEGORIES: 3
+        run: |
+          cd ${{ matrix.category.name }}
+          python scraper.py
+      
+      - name: Upload artifacts (backup)
+        uses: actions/upload-artifact@v4
+        if: steps.should_run.outputs.run == 'true' && always()
+        with:
+          name: ${{ matrix.category.name }}-results
+          path: |
+            ${{ matrix.category.name }}/data/*.xlsx
+            ${{ matrix.category.name }}/data/images/*.jpg
+            ${{ matrix.category.name }}/data/images/*.png
+            ${{ matrix.category.name }}/data/images/*.gif
+            ${{ matrix.category.name }}/data/images/*.webp
+          retention-days: 7
+      
+      - name: Notify on failure
+        if: steps.should_run.outputs.run == 'true' && failure()
+        run: |
+          echo "Scraping job for ${{ matrix.category.display_name }} failed! Check the logs."
+          # Add notification logic here (Slack, email, etc.)
