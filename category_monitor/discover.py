@@ -46,79 +46,92 @@ class CategoryDiscovery:
                 print(f"\n📡 Loading: {self.base_url}")
                 page.goto(self.base_url, wait_until='networkidle', timeout=30000)
                 
-                # Find categories in the slider container
-                selector = '.categories-slider-container'
-                container = page.query_selector(selector)
-                
-                if not container:
-                    print(f"⚠️  Could not find container: {selector}")
-                    print("Trying alternative selectors...")
-                    
-                    # Try alternative: Look for navigation links
-                    container = page.query_selector('nav .categories') or \
-                                page.query_selector('[class*="categor"]') or \
-                                page.query_selector('.nav-strip')
-                
-                if not container:
-                    print("❌ Could not find category container on page")
-                    browser.close()
-                    return {}
-                
-                print(f"✓ Found category container\n")
-                
-                # Get all category links
-                category_links = page.query_selector_all('a[href*="/ar/"]')
-                
                 categories = {}
                 seen_urls = set()
                 
-                print(f"📂 Extracting categories from links...\n")
+                print(f"✓ Page loaded\n")
+                print(f"📂 Extracting categories from two sections...\n")
                 
-                for link in category_links:
+                # ====== SECTION 1: Top categories (.no-children-top-categories) ======
+                print("📍 Section 1: Top Categories")
+                section1_items = page.query_selector_all('.no-children-top-categories li.top-lvl a.level-top')
+                
+                for link in section1_items:
                     try:
                         href = link.get_attribute('href') or ''
-                        text = link.inner_text().strip()
                         
-                        # Filter: Must be category page (ends with .html or /)
+                        # Get text from span inside link
+                        span = link.query_selector('span')
+                        text = span.inner_text().strip() if span else link.inner_text().strip()
+                        
                         if not href or ('/ar/' not in href):
                             continue
                         
-                        # Skip non-category pages
-                        skip_patterns = [
-                            'customer', 'account', 'checkout', 'cart', 'wishlist',
-                            'my-orders', 'login', 'register', 'policy', 'terms',
-                            'about', 'contact', 'help', 'search', 'brand',
-                            'sale', 'cms', 'page', 'blog'
-                        ]
-                        
-                        if any(pattern in href.lower() for pattern in skip_patterns):
-                            continue
-                        
-                        # Extract slug
                         slug = self.extract_slug_from_url(href)
                         if not slug or len(slug) < 2:
                             continue
                         
-                        # Avoid duplicates
                         if href in seen_urls:
                             continue
                         
                         seen_urls.add(href)
                         
-                        # Store category
                         categories[slug] = {
                             'name': text or slug,
                             'url': href,
                             'slug': slug,
+                            'section': 'top_categories',
                             'discovered': datetime.now().isoformat(),
                             'has_scraper': self.check_if_scraper_exists(slug)
                         }
                         
-                        scraper_status = "✅ Has scraper" if categories[slug]['has_scraper'] else "❌ No scraper"
-                        print(f"  • {text[:30]:30} ({slug:25}) - {scraper_status}")
+                        scraper_status = "✅" if categories[slug]['has_scraper'] else "❌"
+                        print(f"  {scraper_status} {text[:35]:35} ({slug})")
                     
                     except Exception as e:
-                        print(f"  ⚠️  Error processing link: {e}")
+                        print(f"  ⚠️  Error: {e}")
+                        continue
+                
+                print()
+                
+                # ====== SECTION 2: Parent categories with submenu (li.level0.category-item) ======
+                print("📍 Section 2: Parent Categories")
+                section2_items = page.query_selector_all('li.level0.category-item.parent > a.level-top')
+                
+                for link in section2_items:
+                    try:
+                        href = link.get_attribute('href') or ''
+                        
+                        # Get text from span inside link
+                        span = link.query_selector('span')
+                        text = span.inner_text().strip() if span else link.inner_text().strip()
+                        
+                        if not href or ('/ar/' not in href):
+                            continue
+                        
+                        slug = self.extract_slug_from_url(href)
+                        if not slug or len(slug) < 2:
+                            continue
+                        
+                        if href in seen_urls:
+                            continue
+                        
+                        seen_urls.add(href)
+                        
+                        categories[slug] = {
+                            'name': text or slug,
+                            'url': href,
+                            'slug': slug,
+                            'section': 'parent_categories',
+                            'discovered': datetime.now().isoformat(),
+                            'has_scraper': self.check_if_scraper_exists(slug)
+                        }
+                        
+                        scraper_status = "✅" if categories[slug]['has_scraper'] else "❌"
+                        print(f"  {scraper_status} {text[:35]:35} ({slug})")
+                    
+                    except Exception as e:
+                        print(f"  ⚠️  Error: {e}")
                         continue
                 
                 browser.close()
