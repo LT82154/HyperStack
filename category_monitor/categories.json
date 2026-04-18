@@ -2,18 +2,7 @@
   "last_updated": "2026-04-18T11:49:05.124694",
   "total_categories": 14,
   "categories": {
-    "sales-4": {
-      "name": "القطع الأخيرة",
-      "url": "https://www.sheeel.com/ar/sales-4.html",
-      "slug": "sales-4",
-      "section": "top_categories",
-      "discovered": "2026-04-18T11:49:04.879443",
-      "has_scraper": false,
-      "project": "NEW",
-      "status": "active",
-      "last_checked": "2026-04-18T11:49:05.124648",
-      "consecutive_failures": 0
-    },
+
     "emergency-needs": {
       "name": "مستلزمات الطوارئ",
       "url": "https://www.sheeel.com/ar/emergency-needs.html",
@@ -24,18 +13,6 @@
       "project": "NEW",
       "status": "active",
       "last_checked": "2026-04-18T11:49:05.124657",
-      "consecutive_failures": 0
-    },
-    "sale11": {
-      "name": "سوبر فرايداي",
-      "url": "https://www.sheeel.com/ar/sale11.html",
-      "slug": "sale11",
-      "section": "parent_categories",
-      "discovered": "2026-04-18T11:49:04.922736",
-      "has_scraper": false,
-      "project": "NEW",
-      "status": "active",
-      "last_checked": "2026-04-18T11:49:05.124660",
       "consecutive_failures": 0
     },
     "coupons": {
@@ -50,18 +27,6 @@
       "last_checked": "2026-04-18T11:49:05.124663",
       "consecutive_failures": 0
     },
-    "end-of-season-offers": {
-      "name": "مستلزمات الصيف",
-      "url": "https://www.sheeel.com/ar/end-of-season-offers.html",
-      "slug": "end-of-season-offers",
-      "section": "parent_categories",
-      "discovered": "2026-04-18T11:49:04.949187",
-      "has_scraper": false,
-      "project": "NEW",
-      "status": "active",
-      "last_checked": "2026-04-18T11:49:05.124665",
-      "consecutive_failures": 0
-    },
     "supermarket": {
       "name": "السوبرماركت",
       "url": "https://www.sheeel.com/ar/supermarket.html",
@@ -72,18 +37,6 @@
       "project": "ThinkGrid",
       "status": "active",
       "last_checked": "2026-04-18T11:49:05.124668",
-      "consecutive_failures": 0
-    },
-    "electronic-festival": {
-      "name": "عروض التلفاز والاجهزة الالكترونية",
-      "url": "https://www.sheeel.com/ar/electronic-festival.html",
-      "slug": "electronic-festival",
-      "section": "parent_categories",
-      "discovered": "2026-04-18T11:49:04.973432",
-      "has_scraper": false,
-      "project": "NEW",
-      "status": "active",
-      "last_checked": "2026-04-18T11:49:05.124671",
       "consecutive_failures": 0
     },
     "electronics": {
