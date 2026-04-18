@@ -42,7 +42,7 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            git diff categories.json >> $GITHUB_ENV
+
           fi
       
       - name: Commit changes
