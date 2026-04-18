@@ -69,15 +69,14 @@ jobs:
             
             // Get git diff to show what changed
             const { execSync } = require('child_process');
-            let diff = '';
+            let oldCategories = { categories: {} };
             try {
-              diff = execSync('cd category_monitor && git show HEAD:categories.json').toString();
+              const diff = execSync('git show HEAD:category_monitor/categories.json').toString();
+              oldCategories = JSON.parse(diff);
             } catch (e) {
-              diff = 'Previous version unavailable';
+              // Previous version unavailable (first run), use empty object
+              oldCategories = { categories: {} };
             }
-            
-            // Parse old and new to find changes
-            const oldCategories = diff ? JSON.parse(diff) : { categories: {} };
             const oldSlugs = Object.keys(oldCategories.categories || {});
             const newSlugs = Object.keys(newCategories.categories);
             
