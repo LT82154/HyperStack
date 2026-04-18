@@ -1,0 +1,156 @@
+{
+  "last_updated": "2026-04-18T00:00:00.000Z",
+  "total_categories": 15,
+  "categories": {
+    "emergency_need": {
+      "name": "احتياجات طارئة",
+      "url": "https://www.sheeel.com/ar/emergency-need.html",
+      "project": "Codinity",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "power_bank_chargers": {
+      "name": "بطاريات خارجية وشواحن",
+      "url": "https://www.sheeel.com/ar/power-bank-chargers.html",
+      "project": "Codinity",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "long_life_food": {
+      "name": "أطعمة طويلة الأجل",
+      "url": "https://www.sheeel.com/ar/long-life-food.html",
+      "project": "Codinity",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "kitchen_fun": {
+      "name": "المطبخ والمتعة",
+      "url": "https://www.sheeel.com/ar/kitchen-fun.html",
+      "project": "Codinity",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "cool_items": {
+      "name": "أشياء عصرية",
+      "url": "https://www.sheeel.com/ar/cool-items1.html",
+      "project": "ThinkGrid",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "best_seller": {
+      "name": "الأكثر مبيعا",
+      "url": "https://www.sheeel.com/ar/best-sellers.html",
+      "project": "ThinkGrid",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "supermarket": {
+      "name": "السوبر ماركت",
+      "url": "https://www.sheeel.com/ar/supermarket.html",
+      "project": "ThinkGrid",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "electronics": {
+      "name": "إلكترونيات",
+      "url": "https://www.sheeel.com/ar/electronics.html",
+      "project": "Techvalue",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "mobile_e_cards": {
+      "name": "الهاتف والبطاقات الإلكترونية",
+      "url": "https://www.sheeel.com/ar/mobiles-e-cards.html",
+      "project": "Techvalue",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "sports_toys": {
+      "name": "الرياضة والألعاب",
+      "url": "https://www.sheeel.com/ar/sports-toys.html",
+      "project": "Sportive",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "home": {
+      "name": "المنزل",
+      "url": "https://www.sheeel.com/ar/home.html",
+      "project": "Kerno",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "perfumes_beauty": {
+      "name": "العطور والجمال",
+      "url": "https://www.sheeel.com/ar/perfumes-beauty.html",
+      "project": "RogueBit",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "flowers_chocolate_by_sogha": {
+      "name": "الزهور والشوكولاتة من سوجة",
+      "url": "https://www.sheeel.com/ar/flowers-chocolate-by-sogha.html",
+      "project": "HyperStack",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "only_on_sheeel": {
+      "name": "حصرياً على شيل",
+      "url": "https://www.sheeel.com/ar/only-on-sheeel.html",
+      "project": "CircuitBloom",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    },
+    "coupons": {
+      "name": "كوبونات",
+      "url": "https://www.sheeel.com/ar/coupons.html",
+      "project": "LogicPulse",
+      "status": "active",
+      "discovered": "2026-04-01T00:00:00.000Z",
+      "has_scraper": true,
+      "last_checked": "2026-04-18T00:00:00.000Z",
+      "consecutive_failures": 0
+    }
+  }
+}
