@@ -22,7 +22,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          cd HyperStack/category_monitor
+          cd category_monitor
           pip install --upgrade pip
           pip install -r requirements.txt
           playwright install chromium
@@ -31,13 +31,13 @@ jobs:
       - name: Discover categories
         id: discover
         run: |
-          cd HyperStack/category_monitor
+          cd category_monitor
           python discover.py
       
       - name: Check for changes in categories.json
         id: changes
         run: |
-          cd HyperStack/category_monitor
+          cd category_monitor
           if git diff --exit-code categories.json > /dev/null 2>&1; then
             echo "changed=false" >> $GITHUB_OUTPUT
           else
@@ -48,7 +48,7 @@ jobs:
       - name: Commit changes
         if: steps.changes.outputs.changed == 'true'
         run: |
-          cd HyperStack/category_monitor
+          cd category_monitor
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
           git add categories.json
@@ -64,14 +64,14 @@ jobs:
             const path = require('path');
             
             // Read the updated categories file
-            const categoriesPath = 'HyperStack/category_monitor/categories.json';
+            const categoriesPath = 'category_monitor/categories.json';
             const newCategories = JSON.parse(fs.readFileSync(categoriesPath, 'utf8'));
             
             // Get git diff to show what changed
             const { execSync } = require('child_process');
             let diff = '';
             try {
-              diff = execSync('cd HyperStack/category_monitor && git show HEAD:categories.json').toString();
+              diff = execSync('cd category_monitor && git show HEAD:categories.json').toString();
             } catch (e) {
               diff = 'Previous version unavailable';
             }
@@ -132,7 +132,7 @@ jobs:
         if: always()
         run: |
           echo "✅ Category monitoring completed"
-          echo "📊 Registry file: HyperStack/category_monitor/categories.json"
+          echo "📊 Registry file: category_monitor/categories.json"
           echo "🔗 Changes: ${{ steps.changes.outputs.changed }}"
           if [ "${{ steps.changes.outputs.changed }}" = "true" ]; then
             echo "📝 GitHub Issue created for changes"
