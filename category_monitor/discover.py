@@ -555,7 +555,7 @@ Output files are saved to `output/` directory in Excel format.
 Created by category discovery system on {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
 ''').strip()
     
-    
+    def compare_with_registry(self):
         """Compare discovered categories with current registry"""
         
         print("\n" + "="*70)
@@ -597,6 +597,83 @@ Created by category discovery system on {datetime.now().strftime('%Y-%m-%d %H:%M
                 scraper = "⚠️  Has scraper" if cat.get('has_scraper') else "✓ No scraper"
                 print(f"  • {cat['name'][:30]:30} ({slug:25}) - {scraper}")
                 print(f"     URL: {cat.get('url', 'unknown')}")
+        
+        if not added and not removed:
+            print("\n✓ No changes - all categories stable")
+        
+        print("\n" + "="*70 + "\n")
+        
+        return changes
+    
+    def update_registry(self, changes):
+        """Update categories.json with new discoveries"""
+        
+        # Start with discovered categories
+        updated_registry = self.discovered_categories.copy()
+        
+        # Add metadata
+        for slug, cat in updated_registry.items():
+            # Preserve existing metadata if available
+            if slug in self.old_registry:
+                old_cat = self.old_registry[slug]
+                cat['project'] = old_cat.get('project', 'unknown')
+                cat['status'] = old_cat.get('status', 'active')
+                cat['last_checked'] = datetime.now().isoformat()
+                cat['consecutive_failures'] = old_cat.get('consecutive_failures', 0)
+            else:
+                # New category
+                cat['project'] = 'NEW'
+                cat['status'] = 'active'
+                cat['last_checked'] = datetime.now().isoformat()
+                cat['consecutive_failures'] = 0
+        
+        # Create full registry object
+        registry_data = {
+            'last_updated': datetime.now().isoformat(),
+            'total_categories': len(updated_registry),
+            'categories': updated_registry
+        }
+        
+        # Save to file
+        with open(self.registry_path, 'w', encoding='utf-8') as f:
+            json.dump(registry_data, f, ensure_ascii=False, indent=2)
+        
+        print(f"✓ Updated registry: {self.registry_path}")
+        print(f"  Total categories: {len(updated_registry)}")
+        print(f"  Last updated: {registry_data['last_updated']}\n")
+        
+        return registry_data
+    
+    def generate_report(self, changes, discovered_count_before):
+        """Generate detailed report of changes"""
+        
+        print("\n" + "="*70)
+        print("📋 FINAL REPORT")
+        print("="*70)
+        
+        if changes['added'] or changes['removed']:
+            print("\n⚠️  CHANGES DETECTED!\n")
+            
+            if changes['added']:
+                print(f"🆕 {len(changes['added'])} new categor{'ies' if len(changes['added']) != 1 else 'y'}:")
+                for slug in sorted(changes['added']):
+                    print(f"   • {slug}")
+                print(f"\n   ⚠️  Action required: Create scraper template for new categories")
+            
+            if changes['removed']:
+                print(f"\n🗑️  {len(changes['removed'])} removed categor{'ies' if len(changes['removed']) != 1 else 'y'}:")
+                for slug in sorted(changes['removed']):
+                    print(f"   • {slug}")
+                print(f"\n   ⚠️  Action required: Archive or update scrapers for removed categories")
+            
+            print("\n" + "="*70)
+            print("✅ GitHub Issue will be created with these changes")
+            print("="*70 + "\n")
+        
+        else:
+            print("\n✅ No changes detected - all categories stable\n")
+            print("="*70 + "\n")
+
         
         if not added and not removed:
             print("\n✓ No changes - all categories stable")
