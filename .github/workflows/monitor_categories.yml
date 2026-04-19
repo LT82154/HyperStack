@@ -48,25 +48,12 @@ jobs:
       - name: Commit changes
         if: steps.changes.outputs.changed == 'true'
         run: |
+          cd category_monitor
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
-          
-          # Add all newly created scraper folders (all non-ignored files)
-          git add HyperStack/ 2>/dev/null || true
-          
-          # Show what will be committed
-          echo "📋 Files to commit:"
-          git diff --cached --name-only
-          
-          # Commit if there are changes
-          if git diff --cached --quiet; then
-            echo "✓ No new files to commit"
-          else
-            echo "✅ Committing changes..."
-            git commit -m "🚀 Auto-generated scrapers + 📋 Updated category registry [bot] - $(date -u +'%Y-%m-%d')"
-            git push
-            echo "✅ Changes pushed to repository"
-          fi
+          git add categories.json
+          git commit -m "� Update category registry [bot] - $(date -u +'%Y-%m-%d')"
+          git push
       
       - name: Create issue for new categories
         if: steps.changes.outputs.changed == 'true'
@@ -143,20 +130,11 @@ jobs:
       - name: Success summary
         if: always()
         run: |
-          echo "=================================================="
-          echo "✅ CATEGORY MONITORING COMPLETED"
-          echo "=================================================="
-          echo ""
-          echo "📊 Registry: HyperStack/category_monitor/categories.json"
-          echo "🔗 Changes detected: ${{ steps.changes.outputs.changed }}"
-          echo ""
+          echo "✅ Category monitoring completed"
+          echo "📊 Registry file: category_monitor/categories.json"
+          echo "🔗 Changes: ${{ steps.changes.outputs.changed }}"
           if [ "${{ steps.changes.outputs.changed }}" = "true" ]; then
-            echo "📝 New scrapers created in HyperStack/"
-            ls -la HyperStack/ | grep -E '^d' | grep -v '^\.' | awk '{print "   📁 " $NF}'
-            echo ""
-            echo "📋 GitHub Issue created for tracking"
+            echo "📝 GitHub Issue created for changes"
           else
-            echo "✓ No changes detected - all categories stable"
+            echo "✓ No changes detected"
           fi
-          echo ""
-          echo "=================================================="
