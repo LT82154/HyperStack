@@ -55,13 +55,8 @@
       "url": "https://www.sheeel.com/ar/emergency-needs.html",
       "slug": "emergency-needs",
       "section": "top_categories",
-<<<<<<< HEAD
       "discovered": "2026-04-19T08:15:51.569405",
       "has_scraper": true,
-=======
-      "discovered": "2026-04-21T07:16:49.270221",
-      "has_scraper": false,
->>>>>>> 29b57ec48b9d8e630de877ee5e0d83d86890641c
       "project": "NEW",
       "status": "active",
       "last_checked": "2026-04-21T07:16:49.456177",

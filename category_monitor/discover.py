@@ -20,10 +20,15 @@ class CategoryDiscovery:
     def load_registry(self):
         """Load current categories registry"""
         if self.registry_path.exists():
-            with open(self.registry_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                self.old_registry = data.get('categories', {})
-                return self.old_registry
+            try:
+                with open(self.registry_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.old_registry = data.get('categories', {})
+                    return self.old_registry
+            except json.JSONDecodeError as e:
+                print(f"⚠️  Registry file is corrupt (possibly a merge conflict): {e}")
+                print("   Starting with empty registry.\n")
+                return {}
         return {}
     
     def extract_slug_from_url(self, url):
