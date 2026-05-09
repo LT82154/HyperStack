@@ -1,29 +1,29 @@
 {
-  "last_updated": "2026-05-07T10:37:15.746863",
-  "total_categories": 16,
+  "last_updated": "2026-05-09T08:21:10.251186",
+  "total_categories": 15,
   "categories": {
-    "super-saver212": {
-      "name": "عروض التوفير",
-      "url": "https://www.sheeel.com/ar/super-saver212.html",
-      "slug": "super-saver212",
-      "section": "top_categories",
-      "discovered": "2026-05-07T10:37:15.570537",
-      "has_scraper": false,
-      "project": "NEW",
-      "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746835",
-      "consecutive_failures": 0
-    },
     "new-arrivals": {
       "name": "جديدنا",
       "url": "https://www.sheeel.com/ar/new-arrivals.html",
       "slug": "new-arrivals",
       "section": "top_categories",
-      "discovered": "2026-05-07T10:37:15.579260",
+      "discovered": "2026-05-09T08:21:10.010808",
       "has_scraper": false,
       "project": "nexial",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746842",
+      "last_checked": "2026-05-09T08:21:10.251137",
+      "consecutive_failures": 0
+    },
+    "super-perfumes": {
+      "name": "مهرجان العطور",
+      "url": "https://www.sheeel.com/ar/super-perfumes.html",
+      "slug": "super-perfumes",
+      "section": "top_categories",
+      "discovered": "2026-05-09T08:21:10.022505",
+      "has_scraper": false,
+      "project": "NEW",
+      "status": "active",
+      "last_checked": "2026-05-09T08:21:10.251147",
       "consecutive_failures": 0
     },
     "under-5": {
@@ -31,23 +31,11 @@
       "url": "https://www.sheeel.com/ar/under-5.html",
       "slug": "under-5",
       "section": "top_categories",
-      "discovered": "2026-05-07T10:37:15.587655",
+      "discovered": "2026-05-09T08:21:10.034250",
       "has_scraper": false,
       "project": "NEW",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746843",
-      "consecutive_failures": 0
-    },
-    "sales-4": {
-      "name": "القطع الأخيرة",
-      "url": "https://www.sheeel.com/ar/sales-4.html",
-      "slug": "sales-4",
-      "section": "top_categories",
-      "discovered": "2026-05-07T10:37:15.595692",
-      "has_scraper": false,
-      "project": "NEW",
-      "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746845",
+      "last_checked": "2026-05-09T08:21:10.251150",
       "consecutive_failures": 0
     },
     "best-sellers": {
@@ -55,11 +43,11 @@
       "url": "https://www.sheeel.com/ar/best-sellers.html",
       "slug": "best-sellers",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.622926",
+      "discovered": "2026-05-09T08:21:10.076834",
       "has_scraper": true,
       "project": "ThinkGrid",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746847",
+      "last_checked": "2026-05-09T08:21:10.251153",
       "consecutive_failures": 0
     },
     "coupons": {
@@ -67,11 +55,11 @@
       "url": "https://www.sheeel.com/ar/coupons.html",
       "slug": "coupons",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.630638",
+      "discovered": "2026-05-09T08:21:10.088396",
       "has_scraper": true,
       "project": "LogicPulse",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746848",
+      "last_checked": "2026-05-09T08:21:10.251156",
       "consecutive_failures": 0
     },
     "supermarket": {
@@ -79,11 +67,11 @@
       "url": "https://www.sheeel.com/ar/supermarket.html",
       "slug": "supermarket",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.638326",
+      "discovered": "2026-05-09T08:21:10.100241",
       "has_scraper": true,
       "project": "ThinkGrid",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746849",
+      "last_checked": "2026-05-09T08:21:10.251158",
       "consecutive_failures": 0
     },
     "end-of-season-offers": {
@@ -91,11 +79,11 @@
       "url": "https://www.sheeel.com/ar/end-of-season-offers.html",
       "slug": "end-of-season-offers",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.645822",
+      "discovered": "2026-05-09T08:21:10.111626",
       "has_scraper": false,
       "project": "fluxora",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746853",
+      "last_checked": "2026-05-09T08:21:10.251161",
       "consecutive_failures": 0
     },
     "electronic-festival": {
@@ -103,11 +91,11 @@
       "url": "https://www.sheeel.com/ar/electronic-festival.html",
       "slug": "electronic-festival",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.653534",
+      "discovered": "2026-05-09T08:21:10.122933",
       "has_scraper": false,
       "project": "NEW",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746854",
+      "last_checked": "2026-05-09T08:21:10.251166",
       "consecutive_failures": 0
     },
     "electronics": {
@@ -115,11 +103,11 @@
       "url": "https://www.sheeel.com/ar/electronics.html",
       "slug": "electronics",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.661869",
+      "discovered": "2026-05-09T08:21:10.134067",
       "has_scraper": true,
       "project": "Techvalue",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746856",
+      "last_checked": "2026-05-09T08:21:10.251169",
       "consecutive_failures": 0
     },
     "mobiles-e-cards": {
@@ -127,11 +115,11 @@
       "url": "https://www.sheeel.com/ar/mobiles-e-cards.html",
       "slug": "mobiles-e-cards",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.669773",
+      "discovered": "2026-05-09T08:21:10.144244",
       "has_scraper": true,
       "project": "Techvalue",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746857",
+      "last_checked": "2026-05-09T08:21:10.251172",
       "consecutive_failures": 0
     },
     "home": {
@@ -139,11 +127,11 @@
       "url": "https://www.sheeel.com/ar/home.html",
       "slug": "home",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.678760",
+      "discovered": "2026-05-09T08:21:10.154444",
       "has_scraper": true,
       "project": "Kerno",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746858",
+      "last_checked": "2026-05-09T08:21:10.251174",
       "consecutive_failures": 0
     },
     "perfumes-beauty": {
@@ -151,11 +139,11 @@
       "url": "https://www.sheeel.com/ar/perfumes-beauty.html",
       "slug": "perfumes-beauty",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.686319",
+      "discovered": "2026-05-09T08:21:10.165854",
       "has_scraper": true,
       "project": "RogueBit",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746859",
+      "last_checked": "2026-05-09T08:21:10.251177",
       "consecutive_failures": 0
     },
     "only-on-sheeel": {
@@ -163,11 +151,11 @@
       "url": "https://www.sheeel.com/ar/only-on-sheeel.html",
       "slug": "only-on-sheeel",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.693707",
+      "discovered": "2026-05-09T08:21:10.176899",
       "has_scraper": true,
       "project": "CircuitBloom",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746860",
+      "last_checked": "2026-05-09T08:21:10.251179",
       "consecutive_failures": 0
     },
     "sports-toys": {
@@ -175,11 +163,11 @@
       "url": "https://www.sheeel.com/ar/sports-toys.html",
       "slug": "sports-toys",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.701920",
+      "discovered": "2026-05-09T08:21:10.187655",
       "has_scraper": true,
       "project": "Sportive",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746861",
+      "last_checked": "2026-05-09T08:21:10.251181",
       "consecutive_failures": 0
     },
     "flowers-chocolate-by-sogha": {
@@ -187,11 +175,11 @@
       "url": "https://www.sheeel.com/ar/flowers-chocolate-by-sogha.html",
       "slug": "flowers-chocolate-by-sogha",
       "section": "parent_categories",
-      "discovered": "2026-05-07T10:37:15.709676",
+      "discovered": "2026-05-09T08:21:10.198284",
       "has_scraper": true,
       "project": "HyperStack",
       "status": "active",
-      "last_checked": "2026-05-07T10:37:15.746863",
+      "last_checked": "2026-05-09T08:21:10.251183",
       "consecutive_failures": 0
     }
   }
