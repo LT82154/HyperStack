@@ -1,0 +1,126 @@
+name: R2 Excel Schema Monitor
+
+on:
+  schedule:
+    - cron: '0 8 * * 1-6'   # Mon–Sat — daily validation
+    - cron: '0 9 * * 0'     # Sunday — weekly stats refresh
+
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Inspect end date YYYY-MM-DD (default yesterday UTC)'
+        required: false
+        type: string
+      days_lookback:
+        description: 'Days to inspect ending at date'
+        required: false
+        default: '1'
+        type: string
+      update_stats:
+        description: 'Merge observations into monitor_stats.yml in R2'
+        required: false
+        default: false
+        type: boolean
+      quality_checks:
+        description: 'Run pandas data-quality checks'
+        required: false
+        default: false
+        type: boolean
+      fail_on_error:
+        description: 'Exit 1 if any check failed'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  daily-check:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 8 * * 1-6'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r monitor/requirements.txt
+
+      - name: Build CLI flags
+        id: flags
+        run: |
+          FLAGS=""
+          if [ -n "${{ inputs.date }}" ]; then
+            FLAGS="$FLAGS --date ${{ inputs.date }}"
+          fi
+          if [ -n "${{ inputs.days_lookback }}" ]; then
+            FLAGS="$FLAGS --days-lookback ${{ inputs.days_lookback }}"
+          fi
+          if [ "${{ inputs.update_stats }}" = "true" ]; then
+            FLAGS="$FLAGS --update-stats"
+          fi
+          if [ "${{ inputs.quality_checks }}" = "true" ]; then
+            FLAGS="$FLAGS --quality"
+          fi
+          if [ "${{ inputs.fail_on_error }}" = "true" ]; then
+            FLAGS="$FLAGS --fail-on-error"
+          fi
+          echo "flags=$FLAGS" >> $GITHUB_OUTPUT
+
+      - name: Run daily schema monitor
+        env:
+          CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_BUCKET_NAME: ${{ secrets.CF_R2_BUCKET_NAME }}
+          CF_R2_ENDPOINT_URL: ${{ secrets.CF_R2_ENDPOINT_URL }}
+        run: python monitor/inspect_r2_schema.py ${{ steps.flags.outputs.flags }}
+
+  weekly-stats:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 9 * * 0'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r monitor/requirements.txt
+
+      - name: Build CLI flags
+        id: flags
+        run: |
+          FLAGS="--days-lookback 7 --update-stats --quality"
+          if [ -n "${{ inputs.date }}" ]; then
+            FLAGS="$FLAGS --date ${{ inputs.date }}"
+          fi
+          if [ "${{ inputs.fail_on_error }}" = "true" ]; then
+            FLAGS="$FLAGS --fail-on-error"
+          fi
+          if [ "${{ inputs.update_stats }}" = "false" ]; then
+            FLAGS=$(echo "$FLAGS" | sed 's/--update-stats//')
+          fi
+          if [ "${{ inputs.quality_checks }}" = "false" ]; then
+            FLAGS=$(echo "$FLAGS" | sed 's/--quality//')
+          fi
+          if [ -n "${{ inputs.days_lookback }}" ] && [ "${{ inputs.days_lookback }}" != "1" ]; then
+            FLAGS=$(echo "$FLAGS" | sed "s/--days-lookback 7/--days-lookback ${{ inputs.days_lookback }}/")
+          fi
+          echo "flags=$FLAGS" >> $GITHUB_OUTPUT
+
+      - name: Run weekly stats monitor
+        env:
+          CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_BUCKET_NAME: ${{ secrets.CF_R2_BUCKET_NAME }}
+          CF_R2_ENDPOINT_URL: ${{ secrets.CF_R2_ENDPOINT_URL }}
+        run: python monitor/inspect_r2_schema.py ${{ steps.flags.outputs.flags }}

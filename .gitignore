@@ -1,1 +1,3 @@
-category_monitor/README.md
+monitor_stats.yml
+monitor/report_*.json
+monitor.md
