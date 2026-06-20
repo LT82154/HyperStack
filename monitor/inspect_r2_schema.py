@@ -65,6 +65,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Local websites-config.yml path (default: load from R2 sheeel_data/monitor/)",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Log each R2 prefix scanned and every file found",
+    )
     return parser.parse_args()
 
 
@@ -458,6 +463,84 @@ def print_summary_table(results: list[dict[str, Any]]) -> None:
         )
 
 
+def failed_checks_for_scraper(scraper_result: dict[str, Any]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    for file_result in scraper_result.get("files", []):
+        source = file_result.get("filename") or file_result.get("key") or "(no file)"
+        for chk in file_result.get("checks", []):
+            if not chk.get("passed"):
+                failures.append({**chk, "source": source})
+        for check_name, quality in file_result.get("quality", {}).items():
+            if not quality.get("passed", True):
+                failures.append(
+                    {
+                        "check": check_name,
+                        "passed": False,
+                        "detail": quality.get("detail", ""),
+                        "severity": quality.get("severity", "medium"),
+                        "source": source,
+                    }
+                )
+    return failures
+
+
+def print_run_header(
+    *,
+    bucket: str,
+    r2_prefix: str,
+    dates: list[datetime],
+    args: argparse.Namespace,
+) -> None:
+    date_labels = ", ".join(d.strftime("%Y-%m-%d") for d in dates)
+    print(f"Bucket: r2://{bucket}/")
+    print(f"Inspect dates ({args.days_lookback} day(s)): {date_labels}")
+    print(f"R2 prefix: {r2_prefix}/year=…/month=…/day=…/{{slug}}/excel-files/")
+    flags = []
+    if args.quality:
+        flags.append("quality")
+    if args.update_stats:
+        flags.append("update-stats")
+    if args.verbose:
+        flags.append("verbose")
+    if flags:
+        print(f"Options: {', '.join(flags)}")
+
+
+def print_failure_details(
+    results: list[dict[str, Any]],
+    *,
+    bucket: str,
+) -> None:
+    failed_rows = [row for row in results if not row["all_passed"]]
+    if not failed_rows:
+        print("\nAll scrapers passed.")
+        return
+
+    print(f"\n{'=' * 58}")
+    print(f"Failure details ({len(failed_rows)} scraper(s))")
+    print(f"{'=' * 58}")
+
+    for row in failed_rows:
+        name = row["scraper"]
+        slug = row.get("slug") or "?"
+        print(
+            f"\n{name} [{slug}] — "
+            f"{row['files_found']} file(s), {row['checks_passed']}/{row['checks_total']} checks passed"
+        )
+
+        if row["files_found"] == 0:
+            for prefix in row.get("searched_prefixes", []):
+                print(f"  scanned: r2://{bucket}/{prefix}  →  0 .xlsx")
+
+        for failure in failed_checks_for_scraper(row):
+            severity = failure.get("severity", "?")
+            check = failure.get("check", "?")
+            detail = failure.get("detail", "")
+            source = failure.get("source", "")
+            source_suffix = f"  ({source})" if source and source != "(no file)" else ""
+            print(f"  FAIL [{severity}] {check}: {detail}{source_suffix}")
+
+
 def main() -> int:
     args = parse_args()
 
@@ -501,6 +584,8 @@ def main() -> int:
         stats_key = f"{r2_prefix}/{MONITOR_SUBPATH}/monitor_stats.yml"
         stats_blob = load_existing_stats(client, bucket, stats_key)
 
+    print_run_header(bucket=bucket, r2_prefix=r2_prefix, dates=dates, args=args)
+
     for scraper in scrapers:
         name = scraper["name"]
         schema = schemas.get(name)
@@ -513,6 +598,7 @@ def main() -> int:
             "scraper": name,
             "slug": scraper.get("slug"),
             "repo": scraper.get("repo"),
+            "searched_prefixes": [],
             "files": [],
             "files_found": 0,
             "checks_passed": 0,
@@ -524,7 +610,18 @@ def main() -> int:
 
         for day in dates:
             prefix = partition_prefix(r2_prefix, category, day)
+            scraper_result["searched_prefixes"].append(prefix)
             keys = list_xlsx_keys(client, bucket, prefix)
+
+            if args.verbose or not keys:
+                day_label = day.strftime("%Y-%m-%d")
+                print(
+                    f"  {name}: r2://{bucket}/{prefix}  "
+                    f"({day_label})  →  {len(keys)} .xlsx"
+                )
+                if args.verbose and keys:
+                    for key in keys:
+                        print(f"    found: {os.path.basename(key)}")
 
             for key in keys:
                 try:
@@ -597,7 +694,10 @@ def main() -> int:
                         check_result(
                             "files_found",
                             False,
-                            f"no .xlsx under prefix for {dates[-1].strftime('%Y-%m-%d')}",
+                            (
+                                f"no .xlsx for {dates[-1].strftime('%Y-%m-%d')}; "
+                                f"searched r2://{bucket}/{scraper_result['searched_prefixes'][-1]}"
+                            ),
                             "critical",
                         )
                     ],
@@ -620,6 +720,7 @@ def main() -> int:
         upload_text(client, bucket, stats_key, yaml.dump(stats_blob, sort_keys=False), "text/yaml")
 
     print_summary_table(summary_rows)
+    print_failure_details(summary_rows, bucket=bucket)
     print(f"\nReport uploaded: r2://{bucket}/{report_key}")
 
     summary_lines = [
@@ -635,6 +736,24 @@ def main() -> int:
             f"| {row['scraper']} | {row['files_found']} | {row['checks_passed']} | "
             f"{row['checks_total']} | {'✅' if row['all_passed'] else '❌'} |"
         )
+
+    failed_rows = [row for row in summary_rows if not row["all_passed"]]
+    if failed_rows:
+        summary_lines.extend(["", "### Failures", ""])
+        for row in failed_rows:
+            summary_lines.append(
+                f"**{row['scraper']}** — {row['checks_passed']}/{row['checks_total']} passed, "
+                f"{row['files_found']} file(s)"
+            )
+            if row["files_found"] == 0:
+                for prefix in row.get("searched_prefixes", []):
+                    summary_lines.append(f"- scanned `r2://{bucket}/{prefix}` → 0 .xlsx")
+            for failure in failed_checks_for_scraper(row):
+                summary_lines.append(
+                    f"- ❌ `{failure.get('check')}`: {failure.get('detail')}"
+                )
+            summary_lines.append("")
+
     summary_lines.append("")
     summary_lines.append(f"Report: `r2://{bucket}/{report_key}`")
     write_step_summary(summary_lines)
