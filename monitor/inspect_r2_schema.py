@@ -27,6 +27,8 @@ from openpyxl import load_workbook
 
 MONITOR_SUBPATH = "monitor"
 DEFAULT_R2_PREFIX = os.environ.get("R2_PREFIX", "sheeel_data")
+ROW_COUNT_TOLERANCE = float(os.environ.get("ROW_COUNT_TOLERANCE", "0.15"))
+ROW_COUNT_NO_MAX = 9_999_999
 CONFIG_R2_KEY = os.environ.get(
     "WEBSITES_CONFIG_R2_KEY",
     f"{DEFAULT_R2_PREFIX}/{MONITOR_SUBPATH}/websites-config.yml",
@@ -88,6 +90,12 @@ def parse_args() -> argparse.Namespace:
         "--categories-registry",
         default=None,
         help="Local categories.json path (default: HyperStack/category_monitor/categories.json)",
+    )
+    parser.add_argument(
+        "--row-count-tolerance",
+        type=float,
+        default=None,
+        help=f"Fraction below/above stats min/max allowed (default: {ROW_COUNT_TOLERANCE})",
     )
     return parser.parse_args()
 
@@ -508,6 +516,35 @@ def run_all_products_duplicate_checks(data: bytes, sheet_names: list[str]) -> li
     return checks
 
 
+def resolve_row_count_bounds(
+    *,
+    scraper_name: str,
+    sheet_name: str,
+    row_count: int,
+    rule: dict[str, Any],
+    stats: dict[str, Any],
+    tolerance: float,
+) -> tuple[int, int, str]:
+    """
+    Derive row-count bounds from monitor_stats when available.
+    Without stats, only enforce schema minimum (no upper cap).
+    """
+    schema_lo, _schema_hi = rule.get("row_count_range", [1, ROW_COUNT_NO_MAX])
+    sheet_stats = (
+        stats.get("scrapers", {}).get(scraper_name, {}).get("sheets", {}).get(sheet_name, {})
+    )
+    obs_min = sheet_stats.get("row_count_min")
+    obs_max = sheet_stats.get("row_count_max")
+
+    if obs_min is not None and obs_max is not None:
+        lo = max(1, int(obs_min * (1 - tolerance)))
+        hi = int(max(obs_max, row_count) * (1 + tolerance))
+        return lo, hi, f"stats [{obs_min},{obs_max}] ±{int(tolerance * 100)}%"
+
+    lo = max(1, int(schema_lo)) if schema_lo else 1
+    return lo, ROW_COUNT_NO_MAX, "min-only (no stats yet)"
+
+
 def validate_file(
     *,
     key: str,
@@ -515,6 +552,9 @@ def validate_file(
     schema: dict[str, Any],
     sheet_data: dict[str, dict[str, Any]],
     inspect_date: datetime,
+    scraper_name: str,
+    stats: dict[str, Any],
+    row_count_tolerance: float,
 ) -> dict[str, Any]:
     filename = os.path.basename(key)
     checks: list[dict[str, Any]] = []
@@ -578,12 +618,19 @@ def validate_file(
         )
 
         row_count = info["row_count"]
-        lo, hi = rule.get("row_count_range", [0, 999999])
+        lo, hi, source = resolve_row_count_bounds(
+            scraper_name=scraper_name,
+            sheet_name=matched_sheet,
+            row_count=row_count,
+            rule=rule,
+            stats=stats,
+            tolerance=row_count_tolerance,
+        )
         checks.append(
             check_result(
                 "row_count_range",
                 lo <= row_count <= hi,
-                f"sheet={matched_sheet}, rows={row_count}, range=[{lo},{hi}]",
+                f"sheet={matched_sheet}, rows={row_count}, range=[{lo},{hi}] ({source})",
                 "high",
             )
         )
@@ -946,11 +993,11 @@ def main() -> int:
 
     summary_rows: list[dict[str, Any]] = []
     any_failure = False
-    stats_blob: dict[str, Any] = {}
-
-    if args.update_stats:
-        stats_key = f"{r2_prefix}/{MONITOR_SUBPATH}/monitor_stats.yml"
-        stats_blob = load_existing_stats(client, bucket, stats_key)
+    stats_key = f"{r2_prefix}/{MONITOR_SUBPATH}/monitor_stats.yml"
+    stats_blob: dict[str, Any] = load_existing_stats(client, bucket, stats_key)
+    row_count_tolerance = (
+        args.row_count_tolerance if args.row_count_tolerance is not None else ROW_COUNT_TOLERANCE
+    )
 
     print_run_header(
         bucket=bucket,
@@ -1017,6 +1064,9 @@ def main() -> int:
                         schema=schema,
                         sheet_data=sheet_data,
                         inspect_date=day,
+                        scraper_name=name,
+                        stats=stats_blob,
+                        row_count_tolerance=row_count_tolerance,
                     )
 
                     if "ALL_PRODUCTS" in sheet_data and len(sheet_data) > 1:
@@ -1117,7 +1167,6 @@ def main() -> int:
     upload_text(client, bucket, report_key, json.dumps(report, indent=2), "application/json")
 
     if args.update_stats:
-        stats_key = f"{r2_prefix}/{MONITOR_SUBPATH}/monitor_stats.yml"
         upload_text(client, bucket, stats_key, yaml.dump(stats_blob, sort_keys=False), "text/yaml")
 
     print_summary_table(summary_rows)
