@@ -31,6 +31,15 @@ CONFIG_R2_KEY = os.environ.get(
     "WEBSITES_CONFIG_R2_KEY",
     f"{DEFAULT_R2_PREFIX}/{MONITOR_SUBPATH}/websites-config.yml",
 )
+DEFAULT_CATEGORIES_REGISTRY = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "category_monitor",
+    "categories.json",
+)
+CATEGORIES_REGISTRY_R2_KEY = os.environ.get(
+    "CATEGORIES_REGISTRY_R2_KEY",
+    f"{DEFAULT_R2_PREFIX}/{MONITOR_SUBPATH}/categories.json",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,6 +78,16 @@ def parse_args() -> argparse.Namespace:
         "--verbose",
         action="store_true",
         help="Log each R2 prefix scanned and every file found",
+    )
+    parser.add_argument(
+        "--require-all-scrapers",
+        action="store_true",
+        help="Fail when any configured scraper has no file, even if category is off-site",
+    )
+    parser.add_argument(
+        "--categories-registry",
+        default=None,
+        help="Local categories.json path (default: HyperStack/category_monitor/categories.json)",
     )
     return parser.parse_args()
 
@@ -115,6 +134,76 @@ def schema_by_scraper(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     for entry in config.get("excel_schema", []):
         mapping[entry["scraper"]] = entry
     return mapping
+
+
+def normalize_slug(value: str) -> str:
+    return value.lower().replace("_", "-").strip("/")
+
+
+def url_slug_from_scraper(scraper: dict[str, Any]) -> str:
+    url = scraper.get("url", "")
+    return normalize_slug(url.split("/ar/")[-1].replace(".html", ""))
+
+
+def load_category_registry_local(path: str) -> dict[str, Any]:
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def load_category_registry_from_r2(client: Any, bucket: str, key: str) -> dict[str, Any]:
+    try:
+        raw = download_bytes(client, bucket, key)
+        return json.loads(raw)
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in ("NoSuchKey", "404"):
+            return {}
+        raise
+
+
+def resolve_category_registry(
+    client: Any, bucket: str, args: argparse.Namespace
+) -> tuple[dict[str, Any], str | None]:
+    local_path = os.environ.get("CATEGORIES_REGISTRY") or args.categories_registry
+    if local_path:
+        if not os.path.isfile(local_path):
+            print(f"WARN: categories registry not found at {local_path}", file=sys.stderr)
+            return {}, None
+        return load_category_registry_local(local_path), f"local:{local_path}"
+
+    if os.path.isfile(DEFAULT_CATEGORIES_REGISTRY):
+        return (
+            load_category_registry_local(DEFAULT_CATEGORIES_REGISTRY),
+            f"local:{DEFAULT_CATEGORIES_REGISTRY}",
+        )
+
+    registry = load_category_registry_from_r2(client, bucket, CATEGORIES_REGISTRY_R2_KEY)
+    if registry:
+        return registry, f"r2://{bucket}/{CATEGORIES_REGISTRY_R2_KEY}"
+
+    print("WARN: no categories registry found; all scrapers treated as on-site", file=sys.stderr)
+    return {}, None
+
+
+def site_status_for_scraper(scraper: dict[str, Any], registry: dict[str, Any]) -> str:
+    """Return on_site, off_site, or unknown."""
+    categories = registry.get("categories", registry)
+    if not categories:
+        return "unknown"
+
+    scraper_url = scraper.get("url", "")
+    url_slug = url_slug_from_scraper(scraper)
+    scraper_slug = normalize_slug(scraper.get("slug", ""))
+
+    for cat in categories.values():
+        if cat.get("url") == scraper_url:
+            return "on_site"
+
+    registry_slugs = {normalize_slug(slug) for slug in categories}
+    if url_slug in registry_slugs or scraper_slug in registry_slugs:
+        return "on_site"
+
+    return "off_site"
 
 
 def build_r2_client() -> Any:
@@ -453,13 +542,19 @@ def write_step_summary(lines: list[str]) -> None:
 
 
 def print_summary_table(results: list[dict[str, Any]]) -> None:
-    print(f"\n{'Scraper':<35} {'Files':>5} {'Pass':>5} {'Total':>5} {'OK':>3}")
-    print("-" * 58)
+    print(f"\n{'Scraper':<35} {'Site':>4} {'Files':>5} {'Pass':>5} {'Total':>5} {'OK':>4}")
+    print("-" * 63)
     for row in results:
-        ok = "YES" if row["all_passed"] else "NO"
+        site = {"on_site": "ON", "off_site": "OFF", "unknown": "?"}.get(
+            row.get("site_status", "unknown"), "?"
+        )
+        if row.get("monitor_status") == "skipped_off_site":
+            ok = "SKIP"
+        else:
+            ok = "YES" if row["all_passed"] else "NO"
         print(
-            f"{row['scraper']:<35} {row['files_found']:>5} "
-            f"{row['checks_passed']:>5} {row['checks_total']:>5} {ok:>3}"
+            f"{row['scraper']:<35} {site:>4} {row['files_found']:>5} "
+            f"{row['checks_passed']:>5} {row['checks_total']:>5} {ok:>4}"
         )
 
 
@@ -490,11 +585,21 @@ def print_run_header(
     r2_prefix: str,
     dates: list[datetime],
     args: argparse.Namespace,
+    registry_source: str | None,
+    on_site_count: int,
+    off_site_count: int,
 ) -> None:
     date_labels = ", ".join(d.strftime("%Y-%m-%d") for d in dates)
     print(f"Bucket: r2://{bucket}/")
     print(f"Inspect dates ({args.days_lookback} day(s)): {date_labels}")
     print(f"R2 prefix: {r2_prefix}/year=…/month=…/day=…/{{slug}}/excel-files/")
+    if registry_source:
+        print(
+            f"Category registry: {registry_source} "
+            f"({on_site_count} on-site, {off_site_count} off-site scrapers)"
+        )
+    else:
+        print("Category registry: not loaded (all scrapers treated as on-site)")
     flags = []
     if args.quality:
         flags.append("quality")
@@ -502,6 +607,8 @@ def print_run_header(
         flags.append("update-stats")
     if args.verbose:
         flags.append("verbose")
+    if args.require_all_scrapers:
+        flags.append("require-all-scrapers")
     if flags:
         print(f"Options: {', '.join(flags)}")
 
@@ -511,26 +618,48 @@ def print_failure_details(
     *,
     bucket: str,
 ) -> None:
-    failed_rows = [row for row in results if not row["all_passed"]]
+    skipped_rows = [row for row in results if row.get("monitor_status") == "skipped_off_site"]
+    failed_rows = [
+        row
+        for row in results
+        if not row["all_passed"] and row.get("monitor_status") != "skipped_off_site"
+    ]
+
+    if skipped_rows:
+        print(f"\n{'=' * 63}")
+        print(f"Off-site categories skipped ({len(skipped_rows)} scraper(s), no file expected)")
+        print(f"{'=' * 63}")
+        for row in skipped_rows:
+            url_slug = url_slug_from_scraper({"url": row.get("url", "")})
+            print(
+                f"  {row['scraper']} [{row.get('slug')}] — "
+                f"not on sheeel.com menu ({url_slug or 'unknown url'})"
+            )
+
     if not failed_rows:
-        print("\nAll scrapers passed.")
+        if skipped_rows:
+            print("\nAll on-site scrapers passed.")
+        else:
+            print("\nAll scrapers passed.")
         return
 
-    print(f"\n{'=' * 58}")
-    print(f"Failure details ({len(failed_rows)} scraper(s))")
-    print(f"{'=' * 58}")
+    print(f"\n{'=' * 63}")
+    print(f"Failure details ({len(failed_rows)} on-site scraper(s))")
+    print(f"{'=' * 63}")
 
     for row in failed_rows:
         name = row["scraper"]
         slug = row.get("slug") or "?"
+        site_note = row.get("site_status", "unknown")
         print(
-            f"\n{name} [{slug}] — "
+            f"\n{name} [{slug}] ({site_note}) — "
             f"{row['files_found']} file(s), {row['checks_passed']}/{row['checks_total']} checks passed"
         )
 
         if row["files_found"] == 0:
             for prefix in row.get("searched_prefixes", []):
                 print(f"  scanned: r2://{bucket}/{prefix}  →  0 .xlsx")
+            print("  → category is on-site but scraper did not upload a file")
 
         for failure in failed_checks_for_scraper(row):
             severity = failure.get("severity", "?")
@@ -559,9 +688,17 @@ def main() -> int:
 
     scrapers = flatten_scrapers(config)
     schemas = schema_by_scraper(config)
+    category_registry, registry_source = resolve_category_registry(client, bucket, args)
 
     bucket = bucket or config.get("meta", {}).get("r2_bucket")
     r2_prefix = config.get("meta", {}).get("r2_prefix", DEFAULT_R2_PREFIX).strip("/")
+
+    on_site_count = sum(
+        1 for s in scrapers if site_status_for_scraper(s, category_registry) == "on_site"
+    )
+    off_site_count = sum(
+        1 for s in scrapers if site_status_for_scraper(s, category_registry) == "off_site"
+    )
 
     if args.date:
         end_date = datetime.strptime(args.date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -572,6 +709,7 @@ def main() -> int:
     report: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "config_source": config_source,
+        "category_registry_source": registry_source,
         "inspect_dates": [d.strftime("%Y-%m-%d") for d in dates],
         "scrapers": [],
     }
@@ -584,7 +722,15 @@ def main() -> int:
         stats_key = f"{r2_prefix}/{MONITOR_SUBPATH}/monitor_stats.yml"
         stats_blob = load_existing_stats(client, bucket, stats_key)
 
-    print_run_header(bucket=bucket, r2_prefix=r2_prefix, dates=dates, args=args)
+    print_run_header(
+        bucket=bucket,
+        r2_prefix=r2_prefix,
+        dates=dates,
+        args=args,
+        registry_source=registry_source,
+        on_site_count=on_site_count,
+        off_site_count=off_site_count,
+    )
 
     for scraper in scrapers:
         name = scraper["name"]
@@ -594,10 +740,14 @@ def main() -> int:
             continue
 
         category = scraper.get("slug") or strip_bucket_placeholder(scraper["r2_path"]).rsplit("/", 1)[-1]
+        site_status = site_status_for_scraper(scraper, category_registry)
         scraper_result: dict[str, Any] = {
             "scraper": name,
             "slug": scraper.get("slug"),
+            "url": scraper.get("url"),
             "repo": scraper.get("repo"),
+            "site_status": site_status,
+            "monitor_status": "pending",
             "searched_prefixes": [],
             "files": [],
             "files_found": 0,
@@ -613,11 +763,12 @@ def main() -> int:
             scraper_result["searched_prefixes"].append(prefix)
             keys = list_xlsx_keys(client, bucket, prefix)
 
-            if args.verbose or not keys:
+            if args.verbose or (not keys and site_status != "off_site"):
                 day_label = day.strftime("%Y-%m-%d")
+                skip_note = " (off-site, skipped)" if not keys and site_status == "off_site" else ""
                 print(
                     f"  {name}: r2://{bucket}/{prefix}  "
-                    f"({day_label})  →  {len(keys)} .xlsx"
+                    f"({day_label})  →  {len(keys)} .xlsx{skip_note}"
                 )
                 if args.verbose and keys:
                     for key in keys:
@@ -685,25 +836,34 @@ def main() -> int:
                     )
 
         if scraper_result["files_found"] == 0:
-            scraper_result["all_passed"] = False
-            any_failure = True
-            scraper_result["checks_total"] += 1
-            scraper_result["files"].append(
-                {
-                    "checks": [
-                        check_result(
-                            "files_found",
-                            False,
-                            (
-                                f"no .xlsx for {dates[-1].strftime('%Y-%m-%d')}; "
-                                f"searched r2://{bucket}/{scraper_result['searched_prefixes'][-1]}"
-                            ),
-                            "critical",
-                        )
-                    ],
-                    "all_passed": False,
-                }
-            )
+            if site_status == "off_site" and not args.require_all_scrapers:
+                scraper_result["monitor_status"] = "skipped_off_site"
+                scraper_result["all_passed"] = True
+            else:
+                scraper_result["monitor_status"] = "failed"
+                scraper_result["all_passed"] = False
+                any_failure = True
+                scraper_result["checks_total"] += 1
+                scraper_result["files"].append(
+                    {
+                        "checks": [
+                            check_result(
+                                "files_found",
+                                False,
+                                (
+                                    f"no .xlsx for {dates[-1].strftime('%Y-%m-%d')}; "
+                                    f"searched r2://{bucket}/{scraper_result['searched_prefixes'][-1]}"
+                                ),
+                                "critical",
+                            )
+                        ],
+                        "all_passed": False,
+                    }
+                )
+        elif scraper_result["all_passed"]:
+            scraper_result["monitor_status"] = "passed"
+        else:
+            scraper_result["monitor_status"] = "failed"
 
         if args.update_stats and file_results_for_stats:
             stats_blob = merge_stats(stats_blob, name, file_results_for_stats)
@@ -721,31 +881,59 @@ def main() -> int:
 
     print_summary_table(summary_rows)
     print_failure_details(summary_rows, bucket=bucket)
-    print(f"\nReport uploaded: r2://{bucket}/{report_key}")
+
+    passed_n = sum(1 for r in summary_rows if r.get("monitor_status") == "passed")
+    failed_n = sum(1 for r in summary_rows if r.get("monitor_status") == "failed")
+    skipped_n = sum(1 for r in summary_rows if r.get("monitor_status") == "skipped_off_site")
+    print(
+        f"\nRun summary: {passed_n} passed, {failed_n} failed (on-site), "
+        f"{skipped_n} skipped (off-site)"
+    )
+    print(f"Report uploaded: r2://{bucket}/{report_key}")
 
     summary_lines = [
         "## R2 Excel Schema Monitor",
         "",
         f"Dates: {', '.join(d.strftime('%Y-%m-%d') for d in dates)}",
+        f"On-site: {on_site_count} | Off-site: {off_site_count} | "
+        f"Passed: {passed_n} | Failed: {failed_n} | Skipped: {skipped_n}",
         "",
-        "| Scraper | Files | Passed | Total | OK |",
-        "| --- | ---: | ---: | ---: | --- |",
+        "| Scraper | Site | Files | Passed | Total | OK |",
+        "| --- | --- | ---: | ---: | ---: | --- |",
     ]
     for row in summary_rows:
+        site = {"on_site": "ON", "off_site": "OFF", "unknown": "?"}.get(
+            row.get("site_status", "unknown"), "?"
+        )
+        if row.get("monitor_status") == "skipped_off_site":
+            ok = "⏭️"
+        else:
+            ok = "✅" if row["all_passed"] else "❌"
         summary_lines.append(
-            f"| {row['scraper']} | {row['files_found']} | {row['checks_passed']} | "
-            f"{row['checks_total']} | {'✅' if row['all_passed'] else '❌'} |"
+            f"| {row['scraper']} | {site} | {row['files_found']} | {row['checks_passed']} | "
+            f"{row['checks_total']} | {ok} |"
         )
 
-    failed_rows = [row for row in summary_rows if not row["all_passed"]]
+    skipped_rows = [row for row in summary_rows if row.get("monitor_status") == "skipped_off_site"]
+    if skipped_rows:
+        summary_lines.extend(["", "### Skipped (off-site)", ""])
+        for row in skipped_rows:
+            summary_lines.append(f"- ⏭️ **{row['scraper']}** — not on sheeel.com menu")
+
+    failed_rows = [
+        row
+        for row in summary_rows
+        if not row["all_passed"] and row.get("monitor_status") != "skipped_off_site"
+    ]
     if failed_rows:
-        summary_lines.extend(["", "### Failures", ""])
+        summary_lines.extend(["", "### Failures (on-site)", ""])
         for row in failed_rows:
             summary_lines.append(
                 f"**{row['scraper']}** — {row['checks_passed']}/{row['checks_total']} passed, "
                 f"{row['files_found']} file(s)"
             )
             if row["files_found"] == 0:
+                summary_lines.append("- category on-site but no file uploaded")
                 for prefix in row.get("searched_prefixes", []):
                     summary_lines.append(f"- scanned `r2://{bucket}/{prefix}` → 0 .xlsx")
             for failure in failed_checks_for_scraper(row):
