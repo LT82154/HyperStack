@@ -130,10 +130,11 @@ def strip_bucket_placeholder(r2_path: str) -> str:
     return path
 
 
-def partition_prefix(base_path: str, day: datetime) -> str:
+def partition_prefix(r2_prefix: str, category: str, day: datetime) -> str:
+    """Match scraper layout: {prefix}/year=…/month=…/day=…/{category}/excel-files/"""
     return (
-        f"{base_path}/year={day.strftime('%Y')}/month={day.strftime('%m')}"
-        f"/day={day.strftime('%d')}/excel-files/"
+        f"{r2_prefix.strip('/')}/year={day.strftime('%Y')}/month={day.strftime('%m')}"
+        f"/day={day.strftime('%d')}/{category.strip('/')}/excel-files/"
     )
 
 
@@ -507,7 +508,7 @@ def main() -> int:
             print(f"WARN: no excel_schema for scraper '{name}'", file=sys.stderr)
             continue
 
-        base = strip_bucket_placeholder(scraper["r2_path"])
+        category = scraper.get("slug") or strip_bucket_placeholder(scraper["r2_path"]).rsplit("/", 1)[-1]
         scraper_result: dict[str, Any] = {
             "scraper": name,
             "slug": scraper.get("slug"),
@@ -522,7 +523,7 @@ def main() -> int:
         file_results_for_stats: list[dict[str, Any]] = []
 
         for day in dates:
-            prefix = partition_prefix(base, day)
+            prefix = partition_prefix(r2_prefix, category, day)
             keys = list_xlsx_keys(client, bucket, prefix)
 
             for key in keys:

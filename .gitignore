@@ -1,3 +1,4 @@
 monitor_stats.yml
 monitor/report_*.json
 monitor.md
+monitor/site.yml
