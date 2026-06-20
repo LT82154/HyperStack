@@ -313,6 +313,201 @@ def check_result(name: str, passed: bool, detail: str, severity: str = "critical
     }
 
 
+def normalize_product_id(value: Any) -> str | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    text = str(value).strip()
+    return text or None
+
+
+def product_ids_from_sheet(data: bytes, sheet_name: str) -> set[str]:
+    return set(product_id_counts_from_sheet(data, sheet_name).keys())
+
+
+def product_id_counts_from_sheet(data: bytes, sheet_name: str) -> dict[str, int]:
+    df = pd.read_excel(io.BytesIO(data), sheet_name=sheet_name, engine="openpyxl")
+    if "product_id" not in df.columns:
+        return {}
+    counts: dict[str, int] = {}
+    for value in df["product_id"]:
+        normalized = normalize_product_id(value)
+        if normalized is not None:
+            counts[normalized] = counts.get(normalized, 0) + 1
+    return counts
+
+
+def _sample_ids(ids: set[str] | list[str], limit: int = 5) -> str:
+    if not ids:
+        return ""
+    ordered = sorted(ids)[:limit]
+    return f" (sample: {', '.join(ordered)})"
+
+
+def run_cross_sheet_product_id_checks(data: bytes, sheet_names: list[str]) -> list[dict[str, Any]]:
+    """For multi-sheet workbooks: verify ALL_PRODUCTS ids match subcategory sheets."""
+    if "ALL_PRODUCTS" not in sheet_names:
+        return []
+
+    sub_sheets = sorted(name for name in sheet_names if name != "ALL_PRODUCTS")
+    if not sub_sheets:
+        return []
+
+    try:
+        all_products_ids = product_ids_from_sheet(data, "ALL_PRODUCTS")
+    except Exception as exc:
+        return [
+            check_result(
+                "all_products_ids_in_subcategory_sheets",
+                False,
+                f"failed to read ALL_PRODUCTS: {exc}",
+                "critical",
+            )
+        ]
+
+    subcategory_union: set[str] = set()
+    read_errors: list[str] = []
+    for sheet in sub_sheets:
+        try:
+            subcategory_union |= product_ids_from_sheet(data, sheet)
+        except Exception as exc:
+            read_errors.append(f"{sheet}: {exc}")
+
+    if read_errors:
+        return [
+            check_result(
+                "all_products_ids_in_subcategory_sheets",
+                False,
+                f"failed to read subcategory sheet(s): {'; '.join(read_errors)}",
+                "critical",
+            )
+        ]
+
+    missing_in_subs = all_products_ids - subcategory_union
+    missing_in_all = subcategory_union - all_products_ids
+
+    checks = [
+        check_result(
+            "all_products_ids_in_subcategory_sheets",
+            not missing_in_subs,
+            (
+                f"{len(missing_in_subs)} id(s) in ALL_PRODUCTS not found in any subcategory sheet"
+                f"{_sample_ids(missing_in_subs)}"
+            ),
+            "critical",
+        ),
+        check_result(
+            "subcategory_ids_in_all_products",
+            not missing_in_all,
+            (
+                f"{len(missing_in_all)} id(s) in subcategory sheets not found in ALL_PRODUCTS"
+                f"{_sample_ids(missing_in_all)}"
+            ),
+            "high",
+        ),
+        check_result(
+            "unique_product_id_set_match",
+            all_products_ids == subcategory_union,
+            (
+                f"unique ALL_PRODUCTS={len(all_products_ids)}, "
+                f"union of {len(sub_sheets)} subcategory sheet(s)={len(subcategory_union)}"
+            ),
+            "high",
+        ),
+    ]
+    return checks
+
+
+def run_all_products_duplicate_checks(data: bytes, sheet_names: list[str]) -> list[dict[str, Any]]:
+    """
+    ALL_PRODUCTS row duplicates are OK when the same id appears in 2+ subcategory sheets.
+    Duplicates not explained that way are failures.
+    """
+    if "ALL_PRODUCTS" not in sheet_names:
+        return []
+
+    sub_sheets = sorted(name for name in sheet_names if name != "ALL_PRODUCTS")
+    if not sub_sheets:
+        return []
+
+    try:
+        all_counts = product_id_counts_from_sheet(data, "ALL_PRODUCTS")
+    except Exception as exc:
+        return [
+            check_result(
+                "duplicate_product_id_unexplained",
+                False,
+                f"failed to read ALL_PRODUCTS: {exc}",
+                "high",
+            )
+        ]
+
+    duplicate_ids = {pid for pid, count in all_counts.items() if count > 1}
+    if not duplicate_ids:
+        return []
+
+    id_to_sub_sheets: dict[str, set[str]] = {pid: set() for pid in duplicate_ids}
+    read_errors: list[str] = []
+    for sheet in sub_sheets:
+        try:
+            sheet_counts = product_id_counts_from_sheet(data, sheet)
+        except Exception as exc:
+            read_errors.append(f"{sheet}: {exc}")
+            continue
+        for pid in duplicate_ids:
+            if pid in sheet_counts:
+                id_to_sub_sheets[pid].add(sheet)
+
+    if read_errors:
+        return [
+            check_result(
+                "duplicate_product_id_unexplained",
+                False,
+                f"failed to read subcategory sheet(s): {'; '.join(read_errors)}",
+                "high",
+            )
+        ]
+
+    explained: list[str] = []
+    unexplained: list[str] = []
+    for pid in duplicate_ids:
+        if len(id_to_sub_sheets[pid]) >= 2:
+            explained.append(pid)
+        else:
+            unexplained.append(pid)
+
+    extra_rows = sum(all_counts[pid] - 1 for pid in explained)
+    checks: list[dict[str, Any]] = []
+
+    if explained:
+        checks.append(
+            check_result(
+                "duplicate_product_id_multisheet",
+                True,
+                (
+                    f"{len(explained)} id(s), {extra_rows} extra row(s) in ALL_PRODUCTS — "
+                    f"product listed in multiple subcategory sheets (expected)"
+                    f"{_sample_ids(explained)}"
+                ),
+                "medium",
+            )
+        )
+
+    checks.append(
+        check_result(
+            "duplicate_product_id_unexplained",
+            not unexplained,
+            (
+                f"{len(unexplained)} id(s) duplicated in ALL_PRODUCTS but not in 2+ subcategory sheets"
+                f"{_sample_ids(unexplained)}"
+            ),
+            "high",
+        )
+    )
+    return checks
+
+
 def validate_file(
     *,
     key: str,
@@ -448,11 +643,13 @@ def run_quality_on_bytes(
             "detail": f"{null_id:.1f}% null product_id",
             "severity": "critical",
         }
-        results["duplicate_product_id"] = {
-            "passed": dupes == 0,
-            "detail": f"{dupes} duplicate product_id values",
-            "severity": "high",
-        }
+        # ALL_PRODUCTS is a concat across subcategory sheets; duplicates are expected there.
+        if sheet_name != "ALL_PRODUCTS":
+            results["duplicate_product_id"] = {
+                "passed": dupes == 0,
+                "detail": f"{dupes} duplicate product_id values",
+                "severity": "high",
+            }
 
     if "name" in df.columns:
         null_name = null_pct("name") or 0
@@ -577,6 +774,39 @@ def failed_checks_for_scraper(scraper_result: dict[str, Any]) -> list[dict[str, 
                     }
                 )
     return failures
+
+
+def alarms_for_scraper(scraper_result: dict[str, Any]) -> list[dict[str, Any]]:
+    alarms: list[dict[str, Any]] = []
+    for file_result in scraper_result.get("files", []):
+        source = file_result.get("filename") or file_result.get("key") or "(no file)"
+        for chk in file_result.get("checks", []):
+            if chk.get("passed") and chk.get("severity") == "medium" and chk.get("check", "").startswith(
+                "duplicate_product_id"
+            ):
+                alarms.append({**chk, "source": source})
+    return alarms
+
+
+def print_alarm_details(results: list[dict[str, Any]]) -> None:
+    alarm_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for row in results:
+        for alarm in alarms_for_scraper(row):
+            alarm_rows.append((row, alarm))
+
+    if not alarm_rows:
+        return
+
+    print(f"\n{'=' * 63}")
+    print(f"Warnings ({len(alarm_rows)} — passed, informational)")
+    print(f"{'=' * 63}")
+    for row, alarm in alarm_rows:
+        source = alarm.get("source", "")
+        source_suffix = f"  ({source})" if source and source != "(no file)" else ""
+        print(
+            f"  WARN [{alarm.get('severity', 'medium')}] {row['scraper']}: "
+            f"{alarm.get('check')} — {alarm.get('detail')}{source_suffix}"
+        )
 
 
 def print_run_header(
@@ -789,6 +1019,17 @@ def main() -> int:
                         inspect_date=day,
                     )
 
+                    if "ALL_PRODUCTS" in sheet_data and len(sheet_data) > 1:
+                        sheet_names = list(sheet_data.keys())
+                        for cross_chk in run_cross_sheet_product_id_checks(raw, sheet_names):
+                            file_result["checks"].append(cross_chk)
+                            if not cross_chk["passed"]:
+                                file_result["all_passed"] = False
+                        for dup_chk in run_all_products_duplicate_checks(raw, sheet_names):
+                            file_result["checks"].append(dup_chk)
+                            if not dup_chk["passed"]:
+                                file_result["all_passed"] = False
+
                     if args.quality:
                         target = (
                             "ALL_PRODUCTS"
@@ -880,6 +1121,7 @@ def main() -> int:
         upload_text(client, bucket, stats_key, yaml.dump(stats_blob, sort_keys=False), "text/yaml")
 
     print_summary_table(summary_rows)
+    print_alarm_details(summary_rows)
     print_failure_details(summary_rows, bucket=bucket)
 
     passed_n = sum(1 for r in summary_rows if r.get("monitor_status") == "passed")
