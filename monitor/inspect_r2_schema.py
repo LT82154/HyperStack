@@ -23,6 +23,8 @@ import pandas as pd
 import yaml
 from botocore.config import Config
 from botocore.exceptions import ClientError
+
+from ads_counter import count_scraper_ads
 from openpyxl import load_workbook
 
 MONITOR_SUBPATH = "monitor"
@@ -1034,6 +1036,7 @@ def main() -> int:
         }
 
         file_results_for_stats: list[dict[str, Any]] = []
+        excel_downloads: list[tuple[str, bytes]] = []
 
         for day in dates:
             prefix = partition_prefix(r2_prefix, category, day)
@@ -1056,6 +1059,7 @@ def main() -> int:
                     head = client.head_object(Bucket=bucket, Key=key)
                     size_kb = head["ContentLength"] / 1024
                     raw = download_bytes(client, bucket, key)
+                    excel_downloads.append((key, raw))
                     sheet_data = inspect_workbook(raw)
 
                     file_result = validate_file(
@@ -1159,8 +1163,22 @@ def main() -> int:
         if args.update_stats and file_results_for_stats:
             stats_blob = merge_stats(stats_blob, name, file_results_for_stats)
 
+        r2_base = partition_prefix(r2_prefix, category, end_date).replace("/excel-files/", "/")
+        try:
+            ads_stats = count_scraper_ads(client, bucket, r2_base, end_date, excel_downloads)
+        except Exception as exc:
+            print(f"WARN: ads count failed for '{name}': {exc}", file=sys.stderr)
+            ads_stats = {"unique_ads": 0, "total_rows": 0, "ads_source": "none"}
+        scraper_result["unique_ads"] = ads_stats.get("unique_ads") or 0
+        scraper_result["total_rows"] = ads_stats.get("total_rows") or 0
+        scraper_result["ads_source"] = ads_stats.get("ads_source", "none")
+
         report["scrapers"].append(scraper_result)
         summary_rows.append(scraper_result)
+
+    report["total_unique_ads"] = sum(
+        r.get("unique_ads") or 0 for r in report["scrapers"]
+    )
 
     report_date = end_date.strftime("%Y-%m-%d")
     report_key = f"{r2_prefix}/{MONITOR_SUBPATH}/{report_date}/report.json"
