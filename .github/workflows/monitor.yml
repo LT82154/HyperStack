@@ -6,7 +6,7 @@ permissions:
 
 on:
   schedule:
-    - cron: '0 18 * * 1-6'   # Mon–Sat — daily validation pm UTC
+    - cron: '0 18 */2 * *'   # every 2 days at 18:00 UTC
     - cron: '0 19 * * 0'     # Sunday — weekly stats refresh pm UTC
 
   workflow_dispatch:
