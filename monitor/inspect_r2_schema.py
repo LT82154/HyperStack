@@ -26,6 +26,7 @@ from botocore.exceptions import ClientError
 
 from ads_counter import count_scraper_ads
 from github_workflows import build_scraper_run_meta, load_site_run_meta
+from r2_file_counter import count_scraper_r2_files, count_site_r2_files
 from request_metrics import (
     aggregate_site_request_metrics,
     build_run_error_summary,
@@ -238,6 +239,16 @@ def strip_bucket_placeholder(r2_path: str) -> str:
     path = re.sub(r"^\{r2_bucket\}/", "", path)
     path = re.sub(r"^\{bucket\}/", "", path)
     return path
+
+
+def is_date_first_partition(config: dict[str, Any]) -> bool:
+    """True when R2 keys use year=/month=/day= before {category} (e.g. sheeel_data)."""
+    pattern = config.get("meta", {}).get("r2_partition_pattern", "")
+    if not pattern or "{category}" not in pattern:
+        return False
+    year_pos = pattern.find("year=")
+    cat_pos = pattern.find("{category}")
+    return year_pos >= 0 and year_pos < cat_pos
 
 
 def partition_prefix(r2_prefix: str, category: str, day: datetime) -> str:
@@ -1194,12 +1205,34 @@ def main() -> int:
         if req_stats.get("failed_items_summary"):
             scraper_result["failed_items_summary"] = req_stats["failed_items_summary"]
 
+        if is_date_first_partition(config):
+            category_marker = f"/{category}/"
+            print(f"  {name}: counting R2 inventory ({category_marker})...")
+            scraper_result["r2_file_count"] = count_scraper_r2_files(
+                client, bucket, r2_prefix, path_contains=category_marker
+            )
+        else:
+            inventory_base = strip_bucket_placeholder(scraper.get("r2_path", "")).strip("/")
+            print(f"  {name}: counting R2 inventory under {inventory_base}/...")
+            scraper_result["r2_file_count"] = count_scraper_r2_files(
+                client, bucket, inventory_base
+            )
+
         report["scrapers"].append(scraper_result)
         summary_rows.append(scraper_result)
 
     report["total_unique_ads"] = sum(
         r.get("unique_ads") or 0 for r in report["scrapers"]
     )
+
+    site_r2_prefix = config.get("meta", {}).get("r2_prefix", "").strip("/")
+    if site_r2_prefix:
+        print(f"Counting site R2 inventory under {site_r2_prefix}/...")
+        report["total_r2_files"] = count_site_r2_files(client, bucket, site_r2_prefix)
+    else:
+        report["total_r2_files"] = sum(
+            r.get("r2_file_count") or 0 for r in report["scrapers"]
+        )
 
     site_metrics = aggregate_site_request_metrics(report["scrapers"])
     report.update(site_metrics)
