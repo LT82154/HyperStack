@@ -25,6 +25,12 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from ads_counter import count_scraper_ads
+from github_workflows import build_scraper_run_meta, load_site_run_meta
+from request_metrics import (
+    aggregate_site_request_metrics,
+    build_run_error_summary,
+    count_scraper_request_metrics,
+)
 from openpyxl import load_workbook
 
 MONITOR_SUBPATH = "monitor"
@@ -951,6 +957,7 @@ def print_failure_details(
 
 def main() -> int:
     args = parse_args()
+    run_started_at = datetime.now(timezone.utc)
 
     bucket = os.environ.get("CF_R2_BUCKET_NAME")
     if not bucket:
@@ -1173,6 +1180,20 @@ def main() -> int:
         scraper_result["total_rows"] = ads_stats.get("total_rows") or 0
         scraper_result["ads_source"] = ads_stats.get("ads_source", "none")
 
+        try:
+            req_stats = count_scraper_request_metrics(client, bucket, r2_base, end_date)
+        except Exception as exc:
+            print(f"WARN: request metrics failed for '{name}': {exc}", file=sys.stderr)
+            req_stats = {"metrics_source": "none"}
+        scraper_result["requests_total"] = req_stats.get("requests_total")
+        scraper_result["requests_failed"] = req_stats.get("requests_failed")
+        scraper_result["error_rate_pct"] = req_stats.get("error_rate_pct")
+        scraper_result["requests_per_min"] = req_stats.get("requests_per_min")
+        scraper_result["duration_sec"] = req_stats.get("duration_sec")
+        scraper_result["metrics_source"] = req_stats.get("metrics_source", "none")
+        if req_stats.get("failed_items_summary"):
+            scraper_result["failed_items_summary"] = req_stats["failed_items_summary"]
+
         report["scrapers"].append(scraper_result)
         summary_rows.append(scraper_result)
 
@@ -1180,7 +1201,23 @@ def main() -> int:
         r.get("unique_ads") or 0 for r in report["scrapers"]
     )
 
+    site_metrics = aggregate_site_request_metrics(report["scrapers"])
+    report.update(site_metrics)
+    report["error_summary"] = build_run_error_summary(report["scrapers"], [])
+
     report_date = end_date.strftime("%Y-%m-%d")
+    passed_n = sum(1 for r in summary_rows if r.get("monitor_status") == "passed")
+    failed_n = sum(1 for r in summary_rows if r.get("monitor_status") == "failed")
+
+    site_meta = load_site_run_meta()
+    report["github_run"] = build_scraper_run_meta(
+        site_meta,
+        report_date,
+        run_started_at.replace(tzinfo=None),
+        failed_n == 0,
+    )
+    report["run_place"] = report["github_run"].get("run_place")
+
     report_key = f"{r2_prefix}/{MONITOR_SUBPATH}/{report_date}/report.json"
     upload_text(client, bucket, report_key, json.dumps(report, indent=2), "application/json")
 
@@ -1191,8 +1228,6 @@ def main() -> int:
     print_alarm_details(summary_rows)
     print_failure_details(summary_rows, bucket=bucket)
 
-    passed_n = sum(1 for r in summary_rows if r.get("monitor_status") == "passed")
-    failed_n = sum(1 for r in summary_rows if r.get("monitor_status") == "failed")
     skipped_n = sum(1 for r in summary_rows if r.get("monitor_status") == "skipped_off_site")
     print(
         f"\nRun summary: {passed_n} passed, {failed_n} failed (on-site), "

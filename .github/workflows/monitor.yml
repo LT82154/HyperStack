@@ -1,5 +1,9 @@
 name: R2 Excel Schema Monitor
 
+permissions:
+  contents: read
+  actions: read
+
 on:
   schedule:
     - cron: '0 18 * * 1-6'   # Mon–Sat — daily validation pm UTC
