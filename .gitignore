@@ -3,3 +3,4 @@ monitor/report_*.json
 monitor.md
 monitor/site.yml
 */__pycache__/*
+monitor/site.yml

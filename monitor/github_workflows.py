@@ -371,3 +371,59 @@ def build_scraper_run_meta(
         "monitor_run": monitor_meta,
         "source": "registry_fallback",
     }
+
+
+def _default_site_yml_r2_key() -> str:
+    folder = os.environ.get("MONITOR_SITE_FOLDER", "sheeel").strip("/")
+    return f"monitor-sites/{folder}/site.yml"
+
+
+def _load_site_yaml_from_r2(client: Any, bucket: str, key: str) -> Dict[str, Any]:
+    obj = client.get_object(Bucket=bucket, Key=key)
+    return yaml.safe_load(obj["Body"].read()) or {}
+
+
+def load_site_run_meta(
+    *,
+    client: Any = None,
+    bucket: str | None = None,
+    registry: Optional[Dict] = None,
+) -> Dict[str, Any]:
+    """
+    Load site identity for github_run metadata.
+
+    Canonical copy lives in R2 (not git): monitor-sites/{folder}/site.yml
+
+    Resolution order:
+      1. R2: SITE_YML_R2_KEY env, else monitor-sites/{MONITOR_SITE_FOLDER}/site.yml
+      2. Local SITE_YML env path (optional dev override)
+    """
+    site: Dict[str, Any] = {}
+    r2_keys: List[str] = []
+    env_r2_key = os.environ.get("SITE_YML_R2_KEY", "").strip()
+    if env_r2_key:
+        r2_keys.append(env_r2_key)
+    r2_keys.append(_default_site_yml_r2_key())
+
+    if client and bucket:
+        for key in r2_keys:
+            try:
+                site = _load_site_yaml_from_r2(client, bucket, key)
+            except Exception as exc:
+                log.debug("site.yml not at r2://%s/%s: %s", bucket, key, exc)
+                continue
+            if site:
+                log.info("Loaded site.yml from r2://%s/%s", bucket, key)
+                break
+
+    if not site:
+        local_path = os.environ.get("SITE_YML", "").strip()
+        if local_path and Path(local_path).is_file():
+            with open(local_path, encoding="utf-8") as fh:
+                site = yaml.safe_load(fh) or {}
+
+    if not site:
+        checked = ", ".join(f"r2://{bucket}/{k}" for k in r2_keys) if bucket else str(r2_keys)
+        log.warning("No site.yml found (%s) — github_run will use registry fallback", checked)
+
+    return merge_registry_site(site, registry)

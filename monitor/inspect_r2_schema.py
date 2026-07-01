@@ -1242,7 +1242,7 @@ def main() -> int:
     passed_n = sum(1 for r in summary_rows if r.get("monitor_status") == "passed")
     failed_n = sum(1 for r in summary_rows if r.get("monitor_status") == "failed")
 
-    site_meta = load_site_run_meta()
+    site_meta = load_site_run_meta(client=client, bucket=bucket)
     report["github_run"] = build_scraper_run_meta(
         site_meta,
         report_date,
