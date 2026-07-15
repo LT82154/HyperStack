@@ -38,7 +38,7 @@ on:
 
 jobs:
   daily-check:
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 8 * * 1-6'
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 18 */2 * *'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
