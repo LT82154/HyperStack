@@ -11,6 +11,15 @@ on:
 
   workflow_dispatch:
     inputs:
+      run_mode:
+        description: 'Which monitor job to run'
+        required: false
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - weekly
+          - both
       date:
         description: 'Inspect end date YYYY-MM-DD (default yesterday UTC)'
         required: false
@@ -38,8 +47,9 @@ on:
 
 jobs:
   daily-check:
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 18 */2 * *'
+    if: github.event.schedule == '0 18 */2 * *' || (github.event_name == 'workflow_dispatch' && (inputs.run_mode == 'daily' || inputs.run_mode == 'both'))
     runs-on: ubuntu-22.04
+    timeout-minutes: 340
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -84,8 +94,9 @@ jobs:
         run: python monitor/inspect_r2_schema.py ${{ steps.flags.outputs.flags }}
 
   weekly-stats:
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 9 * * 0'
+    if: github.event.schedule == '0 19 * * 0' || (github.event_name == 'workflow_dispatch' && (inputs.run_mode == 'weekly' || inputs.run_mode == 'both'))
     runs-on: ubuntu-22.04
+    timeout-minutes: 340
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

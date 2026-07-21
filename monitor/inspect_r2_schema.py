@@ -27,6 +27,7 @@ from botocore.exceptions import ClientError
 from ads_counter import count_scraper_ads
 from github_workflows import build_scraper_run_meta, load_site_run_meta
 from r2_file_counter import count_scraper_r2_files, count_site_r2_files
+from r2_file_counter import count_date_partitioned_category_objects
 from request_metrics import (
     aggregate_site_request_metrics,
     build_run_error_summary,
@@ -1029,6 +1030,17 @@ def main() -> int:
         off_site_count=off_site_count,
     )
 
+    category_inventory_counts: dict[str, int] = {}
+    site_inventory_total: int | None = None
+    date_first_layout = is_date_first_partition(config)
+    if date_first_layout:
+        print(f"Counting R2 inventory under {r2_prefix}/ (single pass by category)...")
+        category_inventory_counts, site_inventory_total = count_date_partitioned_category_objects(
+            client,
+            bucket,
+            r2_prefix,
+        )
+
     for scraper in scrapers:
         name = scraper["name"]
         schema = schemas.get(name)
@@ -1205,12 +1217,8 @@ def main() -> int:
         if req_stats.get("failed_items_summary"):
             scraper_result["failed_items_summary"] = req_stats["failed_items_summary"]
 
-        if is_date_first_partition(config):
-            category_marker = f"/{category}/"
-            print(f"  {name}: counting R2 inventory ({category_marker})...")
-            scraper_result["r2_file_count"] = count_scraper_r2_files(
-                client, bucket, r2_prefix, path_contains=category_marker
-            )
+        if date_first_layout:
+            scraper_result["r2_file_count"] = category_inventory_counts.get(category, 0)
         else:
             inventory_base = strip_bucket_placeholder(scraper.get("r2_path", "")).strip("/")
             print(f"  {name}: counting R2 inventory under {inventory_base}/...")
@@ -1226,7 +1234,9 @@ def main() -> int:
     )
 
     site_r2_prefix = config.get("meta", {}).get("r2_prefix", "").strip("/")
-    if site_r2_prefix:
+    if site_inventory_total is not None:
+        report["total_r2_files"] = site_inventory_total
+    elif site_r2_prefix:
         print(f"Counting site R2 inventory under {site_r2_prefix}/...")
         report["total_r2_files"] = count_site_r2_files(client, bucket, site_r2_prefix)
     else:

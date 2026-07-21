@@ -91,3 +91,61 @@ def count_site_r2_files(r2_client: Any, bucket: str, r2_prefix: str) -> int:
         r2_prefix,
         label=r2_prefix.strip("/") or "(site root)",
     )
+
+
+def count_date_partitioned_category_objects(
+    r2_client: Any,
+    bucket: str,
+    r2_prefix: str,
+) -> tuple[dict[str, int], int]:
+    """
+    Count objects by category for keys like:
+    {prefix}/year=YYYY/month=MM/day=DD/{category}/...
+
+    Returns:
+        ({category: object_count}, total_object_count_under_prefix)
+    """
+    listing_prefix = _normalize_prefix(r2_prefix)
+    category_counts: dict[str, int] = {}
+    total = 0
+    pages = 0
+
+    paginator = r2_client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=listing_prefix):
+        pages += 1
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+
+            total += 1
+
+            if not key.startswith(listing_prefix):
+                continue
+
+            rel = key[len(listing_prefix) :]
+            parts = rel.split("/")
+            if len(parts) < 4:
+                continue
+
+            # Expected: year=.../month=.../day=.../{category}/...
+            if not (
+                parts[0].startswith("year=")
+                and parts[1].startswith("month=")
+                and parts[2].startswith("day=")
+            ):
+                continue
+
+            category = parts[3]
+            if not category:
+                continue
+            category_counts[category] = category_counts.get(category, 0) + 1
+
+        if pages % 20 == 0:
+            print(
+                f"  R2 inventory [{listing_prefix or '(bucket root)'}]: "
+                f"{total} objects listed so far...",
+                file=sys.stderr,
+            )
+
+    return category_counts, total
