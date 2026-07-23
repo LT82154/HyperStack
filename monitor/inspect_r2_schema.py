@@ -1253,12 +1253,18 @@ def main() -> int:
     failed_n = sum(1 for r in summary_rows if r.get("monitor_status") == "failed")
 
     site_meta = load_site_run_meta(client=client, bucket=bucket)
-    report["github_run"] = build_scraper_run_meta(
+    github_run = build_scraper_run_meta(
         site_meta,
         report_date,
         run_started_at.replace(tzinfo=None),
         failed_n == 0,
     )
+    github_gmail = (site_meta.get("github_gmail") or site_meta.get("github_email") or "").strip()
+    if github_gmail:
+        github_run["github_gmail"] = github_gmail
+    report["github_run"] = github_run
+    if github_gmail:
+        report["github_gmail"] = github_gmail
     report["run_place"] = report["github_run"].get("run_place")
 
     report_key = f"{r2_prefix}/{MONITOR_SUBPATH}/{report_date}/report.json"
