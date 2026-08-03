@@ -26,8 +26,11 @@ from botocore.exceptions import ClientError
 
 from ads_counter import count_scraper_ads
 from github_workflows import build_scraper_run_meta, load_site_run_meta
-from r2_file_counter import count_scraper_r2_files, count_site_r2_files
-from r2_file_counter import count_date_partitioned_category_objects
+from r2_file_counter import (
+    count_date_partitioned_category_inventory,
+    count_scraper_r2_inventory,
+    count_site_r2_inventory,
+)
 from request_metrics import (
     aggregate_site_request_metrics,
     build_run_error_summary,
@@ -1030,12 +1033,17 @@ def main() -> int:
         off_site_count=off_site_count,
     )
 
-    category_inventory_counts: dict[str, int] = {}
-    site_inventory_total: int | None = None
+    category_inventory: dict[str, dict[str, int]] = {}
+    site_inventory_total_files: int | None = None
+    site_inventory_total_size_bytes: int | None = None
     date_first_layout = is_date_first_partition(config)
     if date_first_layout:
         print(f"Counting R2 inventory under {r2_prefix}/ (single pass by category)...")
-        category_inventory_counts, site_inventory_total = count_date_partitioned_category_objects(
+        (
+            category_inventory,
+            site_inventory_total_files,
+            site_inventory_total_size_bytes,
+        ) = count_date_partitioned_category_inventory(
             client,
             bucket,
             r2_prefix,
@@ -1218,12 +1226,19 @@ def main() -> int:
             scraper_result["failed_items_summary"] = req_stats["failed_items_summary"]
 
         if date_first_layout:
-            scraper_result["r2_file_count"] = category_inventory_counts.get(category, 0)
+            inv = category_inventory.get(category, {})
+            scraper_result["r2_file_count"] = inv.get("file_count", 0)
+            scraper_result["r2_size_bytes"] = inv.get("size_bytes", 0)
         else:
             inventory_base = strip_bucket_placeholder(scraper.get("r2_path", "")).strip("/")
             print(f"  {name}: counting R2 inventory under {inventory_base}/...")
-            scraper_result["r2_file_count"] = count_scraper_r2_files(
-                client, bucket, inventory_base
+            (
+                scraper_result["r2_file_count"],
+                scraper_result["r2_size_bytes"],
+            ) = count_scraper_r2_inventory(
+                client,
+                bucket,
+                inventory_base,
             )
 
         report["scrapers"].append(scraper_result)
@@ -1234,14 +1249,21 @@ def main() -> int:
     )
 
     site_r2_prefix = config.get("meta", {}).get("r2_prefix", "").strip("/")
-    if site_inventory_total is not None:
-        report["total_r2_files"] = site_inventory_total
+    if site_inventory_total_files is not None and site_inventory_total_size_bytes is not None:
+        report["total_r2_files"] = site_inventory_total_files
+        report["total_r2_size_bytes"] = site_inventory_total_size_bytes
     elif site_r2_prefix:
         print(f"Counting site R2 inventory under {site_r2_prefix}/...")
-        report["total_r2_files"] = count_site_r2_files(client, bucket, site_r2_prefix)
+        (
+            report["total_r2_files"],
+            report["total_r2_size_bytes"],
+        ) = count_site_r2_inventory(client, bucket, site_r2_prefix)
     else:
         report["total_r2_files"] = sum(
             r.get("r2_file_count") or 0 for r in report["scrapers"]
+        )
+        report["total_r2_size_bytes"] = sum(
+            r.get("r2_size_bytes") or 0 for r in report["scrapers"]
         )
 
     site_metrics = aggregate_site_request_metrics(report["scrapers"])

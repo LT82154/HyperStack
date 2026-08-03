@@ -11,8 +11,14 @@ Public API
 count_scraper_r2_files(r2_client, bucket, r2_base, path_contains=None)
     -> int  cumulative object count under the scraper prefix
 
+count_scraper_r2_inventory(r2_client, bucket, r2_base, path_contains=None)
+    -> (int, int)  (object_count, total_bytes) under the scraper prefix
+
 count_site_r2_files(r2_client, bucket, r2_prefix)
     -> int  cumulative object count under the site prefix (includes monitor/)
+
+count_site_r2_inventory(r2_client, bucket, r2_prefix)
+    -> (int, int)  (object_count, total_bytes) under the site prefix
 """
 
 from __future__ import annotations
@@ -56,6 +62,41 @@ def _count_objects(
     return count
 
 
+def _count_objects_and_bytes(
+    r2_client: Any,
+    bucket: str,
+    prefix: str,
+    *,
+    path_contains: str | None = None,
+    label: str | None = None,
+) -> tuple[int, int]:
+    """Return (object_count, total_bytes) under *prefix*, optionally filtered by substring."""
+    listing_prefix = _normalize_prefix(prefix)
+    display = label or listing_prefix or "(bucket root)"
+    count = 0
+    total_bytes = 0
+    pages = 0
+
+    paginator = r2_client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=listing_prefix):
+        pages += 1
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+            if path_contains is not None and path_contains not in key:
+                continue
+            count += 1
+            total_bytes += int(obj.get("Size") or 0)
+        if pages % 20 == 0:
+            print(
+                f"  R2 inventory [{display}]: {count} objects listed so far...",
+                file=sys.stderr,
+            )
+
+    return count, total_bytes
+
+
 def count_scraper_r2_files(
     r2_client: Any,
     bucket: str,
@@ -83,9 +124,39 @@ def count_scraper_r2_files(
     )
 
 
+def count_scraper_r2_inventory(
+    r2_client: Any,
+    bucket: str,
+    r2_base: str,
+    *,
+    path_contains: str | None = None,
+) -> tuple[int, int]:
+    """Count objects and total size in bytes under a scraper's R2 prefix."""
+    label = r2_base.strip("/")
+    if path_contains:
+        label = f"{label} *{path_contains}*"
+    return _count_objects_and_bytes(
+        r2_client,
+        bucket,
+        r2_base,
+        path_contains=path_contains,
+        label=label,
+    )
+
+
 def count_site_r2_files(r2_client: Any, bucket: str, r2_prefix: str) -> int:
     """Count all objects under the site prefix (includes monitor/ artifacts)."""
     return _count_objects(
+        r2_client,
+        bucket,
+        r2_prefix,
+        label=r2_prefix.strip("/") or "(site root)",
+    )
+
+
+def count_site_r2_inventory(r2_client: Any, bucket: str, r2_prefix: str) -> tuple[int, int]:
+    """Count objects and total size in bytes under the site prefix."""
+    return _count_objects_and_bytes(
         r2_client,
         bucket,
         r2_prefix,
@@ -149,3 +220,65 @@ def count_date_partitioned_category_objects(
             )
 
     return category_counts, total
+
+
+def count_date_partitioned_category_inventory(
+    r2_client: Any,
+    bucket: str,
+    r2_prefix: str,
+) -> tuple[dict[str, dict[str, int]], int, int]:
+    """
+    Count objects and bytes by category for keys like:
+    {prefix}/year=YYYY/month=MM/day=DD/{category}/...
+
+    Returns:
+        ({category: {"file_count": int, "size_bytes": int}}, total_files, total_size_bytes)
+    """
+    listing_prefix = _normalize_prefix(r2_prefix)
+    category_inventory: dict[str, dict[str, int]] = {}
+    total_files = 0
+    total_size_bytes = 0
+    pages = 0
+
+    paginator = r2_client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=listing_prefix):
+        pages += 1
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+
+            size = int(obj.get("Size") or 0)
+            total_files += 1
+            total_size_bytes += size
+
+            if not key.startswith(listing_prefix):
+                continue
+
+            rel = key[len(listing_prefix) :]
+            parts = rel.split("/")
+            if len(parts) < 4:
+                continue
+
+            if not (
+                parts[0].startswith("year=")
+                and parts[1].startswith("month=")
+                and parts[2].startswith("day=")
+            ):
+                continue
+
+            category = parts[3]
+            if not category:
+                continue
+            slot = category_inventory.setdefault(category, {"file_count": 0, "size_bytes": 0})
+            slot["file_count"] += 1
+            slot["size_bytes"] += size
+
+        if pages % 20 == 0:
+            print(
+                f"  R2 inventory [{listing_prefix or '(bucket root)'}]: "
+                f"{total_files} objects listed so far...",
+                file=sys.stderr,
+            )
+
+    return category_inventory, total_files, total_size_bytes
