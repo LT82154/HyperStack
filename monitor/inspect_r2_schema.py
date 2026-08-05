@@ -1280,6 +1280,7 @@ def main() -> int:
         report_date,
         run_started_at.replace(tzinfo=None),
         failed_n == 0,
+        summary_rows,
     )
     github_gmail = (site_meta.get("github_gmail") or site_meta.get("github_email") or "").strip()
     if github_gmail:

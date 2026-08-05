@@ -238,6 +238,74 @@ def _pipeline_status(conclusions: List[Optional[str]]) -> str:
     return "success"
 
 
+def _fallback_pipeline_from_scraper_rows(
+    scraper_rows: Optional[List[Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """
+    Build pipeline rollup from monitor scraper rows when GitHub API metadata is unavailable.
+
+    Duration is approximated as the sum of max scraper durations per repo, which maps
+    each repo to a single workflow runtime in CF matrix-based pipelines.
+    """
+    if not scraper_rows:
+        return None
+
+    repo_rollup: Dict[str, Dict[str, Any]] = {}
+    for row in scraper_rows:
+        repo = str(row.get("repo") or "").strip()
+        if not repo:
+            continue
+
+        state = repo_rollup.setdefault(repo, {
+            "duration_sec": 0,
+            "ran": False,
+            "failed": False,
+        })
+
+        monitor_status = str(row.get("monitor_status") or "").strip().lower()
+        if monitor_status in ("passed", "failed"):
+            state["ran"] = True
+        if monitor_status == "failed":
+            state["failed"] = True
+
+        duration = row.get("duration_sec")
+        if isinstance(duration, (int, float)) and duration > 0:
+            state["duration_sec"] = max(int(duration), int(state["duration_sec"]))
+
+    if not repo_rollup:
+        return None
+
+    active_repos = [
+        repo for repo, state in repo_rollup.items()
+        if state["ran"] or state["duration_sec"] > 0
+    ]
+    if not active_repos:
+        return None
+
+    workflows: List[Dict[str, Any]] = []
+    total_duration = 0
+    any_failed = False
+    for repo in active_repos:
+        state = repo_rollup[repo]
+        duration = int(state["duration_sec"])
+        total_duration += duration
+        status = "failure" if state["failed"] else ("success" if state["ran"] else "unknown")
+        if state["failed"]:
+            any_failed = True
+        workflows.append({
+            "repo": repo,
+            "workflow_status": status,
+            "duration_sec": duration,
+        })
+
+    return {
+        "workflow_status": "failure" if any_failed else "success",
+        "duration_sec": total_duration,
+        "workflows": workflows,
+        "source": "scraper_metrics_fallback",
+    }
+
+
 def fetch_pipeline_github_meta(
     site: Dict,
     partition_date: str,
@@ -327,6 +395,7 @@ def build_scraper_run_meta(
     partition_date: str,
     monitor_started_at: datetime,
     validation_passed: bool,
+    scraper_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Build github_run metadata for report.json / dashboard.
@@ -367,14 +436,23 @@ def build_scraper_run_meta(
             fallback_name = str(legacy)
 
     run_place = (site.get("run_place") or "github").strip().lower()
+    fallback_rollup = _fallback_pipeline_from_scraper_rows(scraper_rows)
     result = {
         "run_place": run_place,
         "workflow_name": fallback_name or "—",
-        "workflow_status": None,
-        "duration_sec": None,
+        "workflow_status": (
+            fallback_rollup["workflow_status"] if fallback_rollup else None
+        ),
+        "duration_sec": (
+            fallback_rollup["duration_sec"] if fallback_rollup else None
+        ),
         "monitor_run": monitor_meta,
-        "source": "registry_fallback",
+        "source": (
+            fallback_rollup["source"] if fallback_rollup else "registry_fallback"
+        ),
     }
+    if fallback_rollup:
+        result["workflows"] = fallback_rollup["workflows"]
     github_gmail = (site.get("github_gmail") or site.get("github_email") or "").strip()
     if github_gmail:
         result["github_gmail"] = github_gmail
