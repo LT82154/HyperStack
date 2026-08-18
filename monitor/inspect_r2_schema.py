@@ -27,9 +27,12 @@ from botocore.exceptions import ClientError
 from ads_counter import count_scraper_ads
 from github_workflows import build_scraper_run_meta, load_site_run_meta
 from r2_file_counter import (
-    count_date_partitioned_category_inventory,
+    count_daily_r2_inventory_by_type,
     count_scraper_r2_inventory,
+    count_scraper_r2_inventory_by_type,
     count_site_r2_inventory,
+    count_site_r2_inventory_by_type,
+    merge_r2_type_inventories,
 )
 from request_metrics import (
     aggregate_site_request_metrics,
@@ -265,6 +268,38 @@ def partition_prefix(r2_prefix: str, category: str, day: datetime) -> str:
 
 def iter_dates(end_date: datetime, days: int) -> list[datetime]:
     return [end_date - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
+
+
+R2_TYPE_BYTE_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("images", "r2_images_bytes", "r2_daily_images_bytes"),
+    ("json", "r2_json_bytes", "r2_daily_json_bytes"),
+    ("excel", "r2_excel_bytes", "r2_daily_excel_bytes"),
+    ("csv", "r2_csv_bytes", "r2_daily_csv_bytes"),
+    ("parquet", "r2_parquet_bytes", "r2_daily_parquet_bytes"),
+    ("other", "r2_other_bytes", "r2_daily_other_bytes"),
+)
+
+SITE_R2_TYPE_BYTE_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("images", "total_r2_images_bytes", "total_r2_daily_images_bytes"),
+    ("json", "total_r2_json_bytes", "total_r2_daily_json_bytes"),
+    ("excel", "total_r2_excel_bytes", "total_r2_daily_excel_bytes"),
+    ("csv", "total_r2_csv_bytes", "total_r2_daily_csv_bytes"),
+    ("parquet", "total_r2_parquet_bytes", "total_r2_daily_parquet_bytes"),
+    ("other", "total_r2_other_bytes", "total_r2_daily_other_bytes"),
+)
+
+
+def apply_scraper_r2_type_fields(
+    scraper_result: dict[str, Any],
+    total_inventory: dict[str, Any],
+    daily_inventory: dict[str, Any],
+) -> None:
+    scraper_result["r2_file_count"] = total_inventory["objects"]
+    scraper_result["r2_size_bytes"] = total_inventory["size_bytes"]
+    scraper_result["r2_daily_size"] = daily_inventory["size_bytes"]
+    for category, total_field, daily_field in R2_TYPE_BYTE_FIELDS:
+        scraper_result[total_field] = total_inventory["by_type_bytes"].get(category, 0)
+        scraper_result[daily_field] = daily_inventory["by_type_bytes"].get(category, 0)
 
 
 def list_xlsx_keys(client: Any, bucket: str, prefix: str) -> list[str]:
@@ -1033,21 +1068,7 @@ def main() -> int:
         off_site_count=off_site_count,
     )
 
-    category_inventory: dict[str, dict[str, int]] = {}
-    site_inventory_total_files: int | None = None
-    site_inventory_total_size_bytes: int | None = None
     date_first_layout = is_date_first_partition(config)
-    if date_first_layout:
-        print(f"Counting R2 inventory under {r2_prefix}/ (single pass by category)...")
-        (
-            category_inventory,
-            site_inventory_total_files,
-            site_inventory_total_size_bytes,
-        ) = count_date_partitioned_category_inventory(
-            client,
-            bucket,
-            r2_prefix,
-        )
 
     for scraper in scrapers:
         name = scraper["name"]
@@ -1226,12 +1247,34 @@ def main() -> int:
             scraper_result["failed_items_summary"] = req_stats["failed_items_summary"]
 
         if date_first_layout:
-            inv = category_inventory.get(category, {})
-            scraper_result["r2_file_count"] = inv.get("file_count", 0)
-            scraper_result["r2_size_bytes"] = inv.get("size_bytes", 0)
+            inventory_base = r2_prefix
+            inventory_path_contains = f"/{category}/"
         else:
             inventory_base = strip_bucket_placeholder(scraper.get("r2_path", "")).strip("/")
-            print(f"  {name}: counting R2 inventory under {inventory_base}/...")
+            inventory_path_contains = None
+
+        print(f"  {name}: counting R2 inventory under {inventory_base}/...")
+        try:
+            total_inventory = count_scraper_r2_inventory_by_type(
+                client,
+                bucket,
+                inventory_base,
+                path_contains=inventory_path_contains,
+            )
+            daily_inventories = [
+                count_daily_r2_inventory_by_type(
+                    client,
+                    bucket,
+                    inventory_base,
+                    day,
+                    path_contains=inventory_path_contains,
+                )
+                for day in dates
+            ]
+            daily_inventory = merge_r2_type_inventories(*daily_inventories)
+            apply_scraper_r2_type_fields(scraper_result, total_inventory, daily_inventory)
+        except Exception as exc:
+            print(f"WARN: R2 inventory failed for '{name}': {exc}", file=sys.stderr)
             (
                 scraper_result["r2_file_count"],
                 scraper_result["r2_size_bytes"],
@@ -1239,7 +1282,22 @@ def main() -> int:
                 client,
                 bucket,
                 inventory_base,
+                path_contains=inventory_path_contains,
             )
+            daily_size = 0
+            for day in dates:
+                day_inventory = count_daily_r2_inventory_by_type(
+                    client,
+                    bucket,
+                    inventory_base,
+                    day,
+                    path_contains=inventory_path_contains,
+                )
+                daily_size += day_inventory["size_bytes"]
+            scraper_result["r2_daily_size"] = daily_size
+            for _, total_field, daily_field in R2_TYPE_BYTE_FIELDS:
+                scraper_result[total_field] = 0
+                scraper_result[daily_field] = 0
 
         report["scrapers"].append(scraper_result)
         summary_rows.append(scraper_result)
@@ -1249,15 +1307,22 @@ def main() -> int:
     )
 
     site_r2_prefix = config.get("meta", {}).get("r2_prefix", "").strip("/")
-    if site_inventory_total_files is not None and site_inventory_total_size_bytes is not None:
-        report["total_r2_files"] = site_inventory_total_files
-        report["total_r2_size_bytes"] = site_inventory_total_size_bytes
-    elif site_r2_prefix:
+    if site_r2_prefix:
         print(f"Counting site R2 inventory under {site_r2_prefix}/...")
-        (
-            report["total_r2_files"],
-            report["total_r2_size_bytes"],
-        ) = count_site_r2_inventory(client, bucket, site_r2_prefix)
+        try:
+            site_inventory = count_site_r2_inventory_by_type(client, bucket, site_r2_prefix)
+            report["total_r2_files"] = site_inventory["objects"]
+            report["total_r2_size_bytes"] = site_inventory["size_bytes"]
+            for category, total_field, _ in SITE_R2_TYPE_BYTE_FIELDS:
+                report[total_field] = site_inventory["by_type_bytes"].get(category, 0)
+        except Exception as exc:
+            print(f"WARN: site R2 inventory failed: {exc}", file=sys.stderr)
+            (
+                report["total_r2_files"],
+                report["total_r2_size_bytes"],
+            ) = count_site_r2_inventory(client, bucket, site_r2_prefix)
+            for _, total_field, _ in SITE_R2_TYPE_BYTE_FIELDS:
+                report[total_field] = 0
     else:
         report["total_r2_files"] = sum(
             r.get("r2_file_count") or 0 for r in report["scrapers"]
@@ -1265,6 +1330,20 @@ def main() -> int:
         report["total_r2_size_bytes"] = sum(
             r.get("r2_size_bytes") or 0 for r in report["scrapers"]
         )
+        for (_, scraper_total, _), (_, site_total, _) in zip(
+            R2_TYPE_BYTE_FIELDS,
+            SITE_R2_TYPE_BYTE_FIELDS,
+        ):
+            report[site_total] = sum(r.get(scraper_total, 0) or 0 for r in report["scrapers"])
+
+    report["total_r2_daily_size"] = sum(
+        r.get("r2_daily_size") or 0 for r in report["scrapers"]
+    )
+    for (_, _, scraper_daily), (_, _, site_daily) in zip(
+        R2_TYPE_BYTE_FIELDS,
+        SITE_R2_TYPE_BYTE_FIELDS,
+    ):
+        report[site_daily] = sum(r.get(scraper_daily, 0) or 0 for r in report["scrapers"])
 
     site_metrics = aggregate_site_request_metrics(report["scrapers"])
     report.update(site_metrics)
