@@ -28,10 +28,13 @@ from ads_counter import count_scraper_ads
 from github_workflows import build_scraper_run_meta, load_site_run_meta
 from r2_file_counter import (
     count_daily_r2_inventory_by_type,
+    count_date_partitioned_category_inventory_by_type,
+    count_day_partition_category_inventory_by_type,
     count_scraper_r2_inventory,
     count_scraper_r2_inventory_by_type,
     count_site_r2_inventory,
     count_site_r2_inventory_by_type,
+    empty_r2_type_inventory,
     merge_r2_type_inventories,
 )
 from request_metrics import (
@@ -1070,6 +1073,32 @@ def main() -> int:
 
     date_first_layout = is_date_first_partition(config)
 
+    # Date-first buckets store all categories under one prefix. Listing once per
+    # category (inside the scraper loop) rescans the entire bucket ~N times.
+    category_total_inventory: dict[str, dict[str, Any]] = {}
+    site_precomputed_inventory: dict[str, Any] | None = None
+    daily_category_inventories: list[dict[str, dict[str, Any]]] = []
+
+    if date_first_layout:
+        print(f"Pre-computing R2 inventory by category under {r2_prefix}/ (one listing pass)...")
+        try:
+            category_total_inventory, site_precomputed_inventory = (
+                count_date_partitioned_category_inventory_by_type(client, bucket, r2_prefix)
+            )
+            for day in dates:
+                day_by_category, _day_total = count_day_partition_category_inventory_by_type(
+                    client, bucket, r2_prefix, day
+                )
+                daily_category_inventories.append(day_by_category)
+        except Exception as exc:
+            print(
+                f"WARN: pre-computed R2 inventory failed; falling back to per-scraper listing: {exc}",
+                file=sys.stderr,
+            )
+            category_total_inventory = {}
+            site_precomputed_inventory = None
+            daily_category_inventories = []
+
     for scraper in scrapers:
         name = scraper["name"]
         schema = schemas.get(name)
@@ -1246,58 +1275,110 @@ def main() -> int:
         if req_stats.get("failed_items_summary"):
             scraper_result["failed_items_summary"] = req_stats["failed_items_summary"]
 
-        if date_first_layout:
+        if date_first_layout and site_precomputed_inventory is not None:
+            total_inventory = category_total_inventory.get(category, empty_r2_type_inventory())
+            daily_slices = [
+                daily_category_inventories[i].get(category, empty_r2_type_inventory())
+                for i in range(len(dates))
+            ]
+            daily_inventory = merge_r2_type_inventories(*daily_slices) if daily_slices else empty_r2_type_inventory()
+            apply_scraper_r2_type_fields(scraper_result, total_inventory, daily_inventory)
+        elif date_first_layout:
             inventory_base = r2_prefix
             inventory_path_contains = f"/{category}/"
+            print(f"  {name}: counting R2 inventory under {inventory_base}/...")
+            try:
+                total_inventory = count_scraper_r2_inventory_by_type(
+                    client,
+                    bucket,
+                    inventory_base,
+                    path_contains=inventory_path_contains,
+                )
+                daily_inventories = [
+                    count_daily_r2_inventory_by_type(
+                        client,
+                        bucket,
+                        inventory_base,
+                        day,
+                        path_contains=inventory_path_contains,
+                    )
+                    for day in dates
+                ]
+                daily_inventory = merge_r2_type_inventories(*daily_inventories)
+                apply_scraper_r2_type_fields(scraper_result, total_inventory, daily_inventory)
+            except Exception as exc:
+                print(f"WARN: R2 inventory failed for '{name}': {exc}", file=sys.stderr)
+                (
+                    scraper_result["r2_file_count"],
+                    scraper_result["r2_size_bytes"],
+                ) = count_scraper_r2_inventory(
+                    client,
+                    bucket,
+                    inventory_base,
+                    path_contains=inventory_path_contains,
+                )
+                daily_size = 0
+                for day in dates:
+                    day_inventory = count_daily_r2_inventory_by_type(
+                        client,
+                        bucket,
+                        inventory_base,
+                        day,
+                        path_contains=inventory_path_contains,
+                    )
+                    daily_size += day_inventory["size_bytes"]
+                scraper_result["r2_daily_size"] = daily_size
+                for _, total_field, daily_field in R2_TYPE_BYTE_FIELDS:
+                    scraper_result[total_field] = 0
+                    scraper_result[daily_field] = 0
         else:
             inventory_base = strip_bucket_placeholder(scraper.get("r2_path", "")).strip("/")
             inventory_path_contains = None
-
-        print(f"  {name}: counting R2 inventory under {inventory_base}/...")
-        try:
-            total_inventory = count_scraper_r2_inventory_by_type(
-                client,
-                bucket,
-                inventory_base,
-                path_contains=inventory_path_contains,
-            )
-            daily_inventories = [
-                count_daily_r2_inventory_by_type(
+            print(f"  {name}: counting R2 inventory under {inventory_base}/...")
+            try:
+                total_inventory = count_scraper_r2_inventory_by_type(
                     client,
                     bucket,
                     inventory_base,
-                    day,
                     path_contains=inventory_path_contains,
                 )
-                for day in dates
-            ]
-            daily_inventory = merge_r2_type_inventories(*daily_inventories)
-            apply_scraper_r2_type_fields(scraper_result, total_inventory, daily_inventory)
-        except Exception as exc:
-            print(f"WARN: R2 inventory failed for '{name}': {exc}", file=sys.stderr)
-            (
-                scraper_result["r2_file_count"],
-                scraper_result["r2_size_bytes"],
-            ) = count_scraper_r2_inventory(
-                client,
-                bucket,
-                inventory_base,
-                path_contains=inventory_path_contains,
-            )
-            daily_size = 0
-            for day in dates:
-                day_inventory = count_daily_r2_inventory_by_type(
+                daily_inventories = [
+                    count_daily_r2_inventory_by_type(
+                        client,
+                        bucket,
+                        inventory_base,
+                        day,
+                        path_contains=inventory_path_contains,
+                    )
+                    for day in dates
+                ]
+                daily_inventory = merge_r2_type_inventories(*daily_inventories)
+                apply_scraper_r2_type_fields(scraper_result, total_inventory, daily_inventory)
+            except Exception as exc:
+                print(f"WARN: R2 inventory failed for '{name}': {exc}", file=sys.stderr)
+                (
+                    scraper_result["r2_file_count"],
+                    scraper_result["r2_size_bytes"],
+                ) = count_scraper_r2_inventory(
                     client,
                     bucket,
                     inventory_base,
-                    day,
                     path_contains=inventory_path_contains,
                 )
-                daily_size += day_inventory["size_bytes"]
-            scraper_result["r2_daily_size"] = daily_size
-            for _, total_field, daily_field in R2_TYPE_BYTE_FIELDS:
-                scraper_result[total_field] = 0
-                scraper_result[daily_field] = 0
+                daily_size = 0
+                for day in dates:
+                    day_inventory = count_daily_r2_inventory_by_type(
+                        client,
+                        bucket,
+                        inventory_base,
+                        day,
+                        path_contains=inventory_path_contains,
+                    )
+                    daily_size += day_inventory["size_bytes"]
+                scraper_result["r2_daily_size"] = daily_size
+                for _, total_field, daily_field in R2_TYPE_BYTE_FIELDS:
+                    scraper_result[total_field] = 0
+                    scraper_result[daily_field] = 0
 
         report["scrapers"].append(scraper_result)
         summary_rows.append(scraper_result)
@@ -1307,7 +1388,13 @@ def main() -> int:
     )
 
     site_r2_prefix = config.get("meta", {}).get("r2_prefix", "").strip("/")
-    if site_r2_prefix:
+    if site_precomputed_inventory is not None:
+        site_inventory = site_precomputed_inventory
+        report["total_r2_files"] = site_inventory["objects"]
+        report["total_r2_size_bytes"] = site_inventory["size_bytes"]
+        for category, total_field, _ in SITE_R2_TYPE_BYTE_FIELDS:
+            report[total_field] = site_inventory["by_type_bytes"].get(category, 0)
+    elif site_r2_prefix:
         print(f"Counting site R2 inventory under {site_r2_prefix}/...")
         try:
             site_inventory = count_site_r2_inventory_by_type(client, bucket, site_r2_prefix)

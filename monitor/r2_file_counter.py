@@ -70,6 +70,87 @@ def _empty_type_inventory() -> dict[str, Any]:
     }
 
 
+def empty_r2_type_inventory() -> dict[str, Any]:
+    """Return a zeroed typed inventory dict (same shape as count_r2_inventory_by_type)."""
+    return _empty_type_inventory()
+
+
+def _accumulate_typed_inventory(inventory: dict[str, Any], key: str, size: int) -> None:
+    file_type = _classify_file_type(key)
+    inventory["objects"] += 1
+    inventory["size_bytes"] += size
+    inventory["by_type_objects"][file_type] += 1
+    inventory["by_type_bytes"][file_type] += size
+
+
+def _category_from_date_partitioned_key(key: str, listing_prefix: str) -> str | None:
+    """Extract category slug from keys like {prefix}/year=…/month=…/day=…/{category}/…"""
+    if not key.startswith(listing_prefix):
+        return None
+    rel = key[len(listing_prefix) :]
+    parts = rel.split("/")
+    if len(parts) < 4:
+        return None
+    if not (
+        parts[0].startswith("year=")
+        and parts[1].startswith("month=")
+        and parts[2].startswith("day=")
+    ):
+        return None
+    category = parts[3]
+    return category or None
+
+
+def _category_from_day_partitioned_key(key: str, listing_prefix: str) -> str | None:
+    """Extract category slug from keys like {prefix}/year=…/month=…/day=…/{category}/…"""
+    if not key.startswith(listing_prefix):
+        return None
+    rel = key[len(listing_prefix) :]
+    category = rel.split("/", 1)[0]
+    return category or None
+
+
+def _scan_inventory_by_category_and_type(
+    r2_client: Any,
+    bucket: str,
+    listing_prefix: str,
+    *,
+    category_parser,
+    label: str,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Single R2 listing pass grouped by partition category and file type."""
+    normalized_prefix = _normalize_prefix(listing_prefix)
+    by_category: dict[str, dict[str, Any]] = {}
+    site_total = _empty_type_inventory()
+    pages = 0
+
+    paginator = r2_client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=normalized_prefix):
+        pages += 1
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+
+            size = int(obj.get("Size") or 0)
+            _accumulate_typed_inventory(site_total, key, size)
+
+            category = category_parser(key, normalized_prefix)
+            if not category:
+                continue
+
+            slot = by_category.setdefault(category, _empty_type_inventory())
+            _accumulate_typed_inventory(slot, key, size)
+
+        if pages % 20 == 0:
+            print(
+                f"  R2 inventory [{label}]: {site_total['objects']} objects listed so far...",
+                file=sys.stderr,
+            )
+
+    return by_category, site_total
+
+
 def _classify_file_type(key: str) -> str:
     ext = os.path.splitext(key)[1].lower()
     if ext in _IMAGE_EXTENSIONS:
@@ -502,6 +583,48 @@ def day_partition_prefix(r2_prefix: str, day: datetime) -> str:
     return (
         f"{r2_prefix.strip('/')}/year={day.strftime('%Y')}/month={day.strftime('%m')}"
         f"/day={day.strftime('%d')}/"
+    )
+
+
+def count_date_partitioned_category_inventory_by_type(
+    r2_client: Any,
+    bucket: str,
+    r2_prefix: str,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """
+    One pass over the site prefix: typed inventory per category plus site totals.
+
+    Keys must follow {prefix}/year=YYYY/month=MM/day=DD/{category}/...
+    """
+    label = r2_prefix.strip("/") or "(site root)"
+    return _scan_inventory_by_category_and_type(
+        r2_client,
+        bucket,
+        r2_prefix,
+        category_parser=_category_from_date_partitioned_key,
+        label=label,
+    )
+
+
+def count_day_partition_category_inventory_by_type(
+    r2_client: Any,
+    bucket: str,
+    r2_prefix: str,
+    day: datetime,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """
+    One pass over a single day partition: typed inventory per category plus day totals.
+
+    Keys must follow {prefix}/year=YYYY/month=MM/day=DD/{category}/...
+    """
+    partition_prefix = day_partition_prefix(r2_prefix, day)
+    label = f"{r2_prefix.strip('/') or '(site root)'} ({day.strftime('%Y-%m-%d')})"
+    return _scan_inventory_by_category_and_type(
+        r2_client,
+        bucket,
+        partition_prefix,
+        category_parser=_category_from_day_partitioned_key,
+        label=label,
     )
 
 
