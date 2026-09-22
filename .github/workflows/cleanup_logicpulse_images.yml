@@ -1,0 +1,50 @@
+name: Cleanup LogicPulse Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      storage:
+        description: "Storage to inspect"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - r2
+          - s3
+          - both
+      execute:
+        description: "Permanently delete matching images (unchecked means dry run)"
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r monitor/requirements.txt
+
+      - name: Inspect or delete LogicPulse images
+        env:
+          CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_BUCKET_NAME: ${{ secrets.CF_R2_BUCKET_NAME }}
+          CF_R2_ENDPOINT_URL: ${{ secrets.CF_R2_ENDPOINT_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+        run: |
+          FLAGS="--storage ${{ inputs.storage }}"
+          if [ "${{ inputs.execute }}" = "true" ]; then
+            FLAGS="$FLAGS --execute"
+          fi
+          python monitor/cleanup_logicpulse_images.py $FLAGS
