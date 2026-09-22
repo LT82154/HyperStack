@@ -1,9 +1,8 @@
-"""Delete LogicPulse image objects while preserving the coupons category."""
+"""Delete scraper image objects while preserving LogicPulse coupons."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 from typing import Any, Iterable
@@ -12,21 +11,51 @@ import boto3
 from botocore.config import Config
 
 
-DEFAULT_REGISTRY = Path(__file__).resolve().parents[1] / "category_monitor" / "categories.json"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".svg"}
 DELETE_BATCH_SIZE = 1000
-
-
-def logicpulse_categories(registry_path: Path, preserve_category: str) -> set[str]:
-    """Return LogicPulse category slugs except the explicitly preserved slug."""
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    preserved = preserve_category.strip().lower()
-    return {
-        slug
-        for slug, details in registry.get("categories", {}).items()
-        if str(details.get("project", "")).strip().lower() == "logicpulse"
-        and slug.strip().lower() != preserved
+SCRAPER_IMAGE_CATEGORIES = frozenset(
+    {
+        "emergency_need",
+        "power_bank_chargers",
+        "long_life_food",
+        "last_pieces",
+        "kitchen_fun",
+        "eid_coupons",
+        "cool_items",
+        "best_seller",
+        "supermarket",
+        "electronics",
+        "mobile_e_cards",
+        "sports_toys",
+        "under_5",
+        "water_beverages",
+        "home",
+        "organizers",
+        "super_saver",
+        "perfumes_beauty",
+        "super_perfumes",
+        "super_cleaning",
+        "testers",
+        "only_on_sheeel",
+        "eid_offers",
+        "tools_car_accessories",
+        "end_of_season_offers",
+        "last_items",
+        "home_decor_furniture",
+        "coupons",
+        "flowers_chocolate_by_sogha",
+        "super_friday",
+        "electronic_festival",
+        "new_arrivals",
+        "buy_now_pay_later",
     }
+)
+
+
+def cleanup_categories(preserve_category: str) -> set[str]:
+    """Return all known scraper categories except the explicitly preserved one."""
+    preserved = preserve_category.strip().lower()
+    return {category for category in SCRAPER_IMAGE_CATEGORIES if category.lower() != preserved}
 
 
 def category_from_image_key(key: str) -> str | None:
@@ -130,7 +159,6 @@ def clean_storage(target: str, categories: set[str], *, execute: bool) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--storage", choices=("r2", "s3", "both"), default="both")
-    parser.add_argument("--categories-file", type=Path, default=DEFAULT_REGISTRY)
     parser.add_argument("--preserve-category", default="coupons")
     parser.add_argument("--execute", action="store_true", help="Actually delete objects")
     return parser.parse_args()
@@ -138,9 +166,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    categories = logicpulse_categories(args.categories_file, args.preserve_category)
+    categories = cleanup_categories(args.preserve_category)
     if not categories:
-        raise RuntimeError("No non-preserved LogicPulse categories were found in the registry")
+        raise RuntimeError("No non-preserved scraper categories were configured")
     targets = ("r2", "s3") if args.storage == "both" else (args.storage,)
     for target in targets:
         clean_storage(target, categories, execute=args.execute)

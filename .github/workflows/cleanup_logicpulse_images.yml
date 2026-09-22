@@ -1,4 +1,4 @@
-name: Cleanup LogicPulse Images
+name: Cleanup Scraper Images (Preserve LogicPulse Coupons)
 
 on:
   workflow_dispatch:
@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r monitor/requirements.txt
 
-      - name: Inspect or delete LogicPulse images
+      - name: Inspect or delete scraper images
         env:
           CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
           CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
